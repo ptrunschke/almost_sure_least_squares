@@ -97,6 +97,9 @@ def orthonormalise(basisval, space, domain, gridpoints):
 
     return orthogonal_basisval
 
+def kernel_matrix(kernel, xs):
+    return kernel(xs[:, None], xs[None, :])
+
 if __name__ == "__main__":
     # space = "h1"
     # space = "h10"
