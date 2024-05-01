@@ -14,44 +14,27 @@ import pyvista
 import gmsh
 gmsh.initialize()
 
-
-from IPython import embed; embed()
-exit()
-
-
 dimension = 2
-gmsh.model.add("L_shape")
-gmsh.model.occ.add_point(0, 0, 0, tag=1)
-gmsh.model.occ.add_point(2, 0, 0, tag=2)
-gmsh.model.occ.add_point(2, 2-1e-5, 0, tag=3)
-gmsh.model.occ.add_point(1, 1, 0, tag=4)
-gmsh.model.occ.add_point(2-1e-5, 2, 0, tag=5)
-gmsh.model.occ.add_point(0, 2, 0, tag=6)
-gmsh.model.occ.add_line(1, 2, tag=1)
-gmsh.model.occ.add_line(2, 3, tag=2)
-gmsh.model.occ.add_line(3, 4, tag=3)
-gmsh.model.occ.add_line(4, 5, tag=4)
-gmsh.model.occ.add_line(5, 6, tag=5)
-gmsh.model.occ.add_line(6, 1, tag=6)
-gmsh.model.occ.add_curve_loop([1, 2, 3, 4, 5, 6], tag=1)
-gmsh.model.occ.add_plane_surface([1], tag=1)
-gmsh.model.occ.synchronize()
-gmsh.model.add_physical_group(0, [1, 2, 3, 4, 5, 6], tag=1, name="points")
-gmsh.model.add_physical_group(1, [1, 2, 3, 4, 5, 6], tag=2, name="lines")
-gmsh.model.add_physical_group(2, [1], tag=3, name="facets")
-gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.05)
-gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 0.05)
-gmsh.model.mesh.generate(dimension)
-gmsh_model_rank = 0
-mesh_comm = MPI.COMM_WORLD
-domain, cell_markers, facet_markers = gmshio.model_to_mesh(gmsh.model, mesh_comm, gmsh_model_rank, gdim=dimension)
-gmsh.finalize()
 
-# gmsh.model.occ.add_rectangle(0, 0, 0, 2, 1, tag=1)
-# gmsh.model.occ.add_rectangle(0, 0, 0, 1, 2, tag=2)
-# gmsh.model.occ.fuse([(dimension, 1)], [(dimension, 2)], tag=3)
+# gmsh.model.add("L_shape")
+# gmsh.model.occ.add_point(0, 0, 0, tag=1)
+# gmsh.model.occ.add_point(2, 0, 0, tag=2)
+# gmsh.model.occ.add_point(2, 2-1e-5, 0, tag=3)
+# gmsh.model.occ.add_point(1, 1, 0, tag=4)
+# gmsh.model.occ.add_point(2-1e-5, 2, 0, tag=5)
+# gmsh.model.occ.add_point(0, 2, 0, tag=6)
+# gmsh.model.occ.add_line(1, 2, tag=1)
+# gmsh.model.occ.add_line(2, 3, tag=2)
+# gmsh.model.occ.add_line(3, 4, tag=3)
+# gmsh.model.occ.add_line(4, 5, tag=4)
+# gmsh.model.occ.add_line(5, 6, tag=5)
+# gmsh.model.occ.add_line(6, 1, tag=6)
+# gmsh.model.occ.add_curve_loop([1, 2, 3, 4, 5, 6], tag=1)
+# gmsh.model.occ.add_plane_surface([1], tag=1)
 # gmsh.model.occ.synchronize()
-# gmsh.model.add_physical_group(dimension, [3], tag=1, name="L_shape")
+# gmsh.model.add_physical_group(0, [1, 2, 3, 4, 5, 6], tag=1, name="points")
+# gmsh.model.add_physical_group(1, [1, 2, 3, 4, 5, 6], tag=2, name="lines")
+# gmsh.model.add_physical_group(2, [1], tag=3, name="facets")
 # gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.05)
 # gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 0.05)
 # gmsh.model.mesh.generate(dimension)
@@ -59,6 +42,19 @@ gmsh.finalize()
 # mesh_comm = MPI.COMM_WORLD
 # domain, cell_markers, facet_markers = gmshio.model_to_mesh(gmsh.model, mesh_comm, gmsh_model_rank, gdim=dimension)
 # gmsh.finalize()
+
+gmsh.model.occ.add_rectangle(0, 0, 0, 2, 1, tag=1)
+gmsh.model.occ.add_rectangle(0, 0, 0, 1, 2, tag=2)
+gmsh.model.occ.fuse([(dimension, 1)], [(dimension, 2)], tag=3)
+gmsh.model.occ.synchronize()
+gmsh.model.add_physical_group(dimension, [3], tag=1, name="L_shape")
+gmsh.option.setNumber("Mesh.CharacteristicLengthMin", 0.05)
+gmsh.option.setNumber("Mesh.CharacteristicLengthMax", 0.05)
+gmsh.model.mesh.generate(dimension)
+gmsh_model_rank = 0
+mesh_comm = MPI.COMM_WORLD
+domain, cell_markers, facet_markers = gmshio.model_to_mesh(gmsh.model, mesh_comm, gmsh_model_rank, gdim=dimension)
+gmsh.finalize()
 
 V = fem.functionspace(domain, ("Lagrange", 1))
 
