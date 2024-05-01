@@ -1,4 +1,4 @@
-name: fenicsx
+name: kernel_ls
 channels:
   - conda-forge
 dependencies:

@@ -1,0 +1,3 @@
+[submodule "local_mamba"]
+	path = local_mamba
+	url = git@github.com:ptrunschke/local_mamba.git
