@@ -1,0 +1,5 @@
+*.np[yz]
+*.png
+*.jpg
+__pycache__
+*.sw[pon]

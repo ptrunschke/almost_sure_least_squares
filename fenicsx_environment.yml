@@ -1,0 +1,16 @@
+name: fenicsx
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.10
+  - fenics-dolfinx
+  - mpich
+  - pyvista
+  - numpy
+  - scipy
+  - tqdm
+  - matplotlib
+  - jupyter
+  - ipython
+  - gmsh
+  - python-gmsh
