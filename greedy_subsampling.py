@@ -18,7 +18,7 @@ def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
         # We want to compute lambda(x) = lambda_min(bs @ inv(K) @ bs.T).
         cs = np.linalg.lstsq(K, bs.T, rcond=None)[0]
         assert cs.shape == (len(points), basis.dimension)
-        return np.linalg.norm(bs @ cs, ord=-2)
+        return min(max(np.linalg.norm(bs @ cs, ord=-2), 0), 1)
     return lambda_
 
 
@@ -33,7 +33,7 @@ def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
         cs = np.linalg.lstsq(K, bs.T, rcond=None)[0].T
         assert cs.shape == (basis.dimension, len(points))
         # Then eta(x) = sum_j bs[j] @ cs[j] = sum_{i,j} bs[j, i] * cs[j, i].
-        return np.sum(bs * cs)
+        return min(max(np.sum(bs * cs), 0), basis.dimension)
     return eta
 
 
@@ -93,6 +93,7 @@ if __name__ == "__main__":
 
     for space in ["h10", "h1", "h1gauss"]:
     # for space in ["h1gauss"]:
+    # for space in ["h10"]:
         print(f"Compute subsample statistics for {space} with {basis_name} basis")
         if space == "h10":
             rkhs_kernel = H10Kernel((-1, 1))
@@ -148,6 +149,9 @@ if __name__ == "__main__":
                 etas[subsample_size, trial] = eta(full_sample[selected])
                 mus[subsample_size, trial] = mu(full_sample[selected])
 
+        assert np.all(0 < etas) and np.all(etas <= rkhs_basis.dimension)
+        assert np.all(1 <= mus)
+
         tab20 = mpl.colormaps["tab20"].colors
         fig, ax_1 = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
         positions = np.arange(1, max_subsample_size+1)
@@ -164,10 +168,10 @@ if __name__ == "__main__":
         ax_1.set_xticks(np.arange(1, max_subsample_size+1, max_subsample_size // 9))
         ax_1.set_xlabel("sample size")
         ax_1.set_yscale("linear")
-        ax_1.set_ylim(0, dimension)
+        ax_1.set_ylim(0, np.ceil(np.max(etas)) + 0.5)
         ax_1.set_ylabel(r"$\eta$", color="tab:blue", rotation=0, labelpad=8)
-        ax_1.set_yticks(np.arange(1, dimension))
-        ax_1.set_yticklabels([f"${i}$" for i in range(1, dimension)])
+        ax_1.set_yticks(np.arange(1, int(np.ceil(np.max(etas))) + 1))
+        ax_1.set_yticklabels([f"${i}$" for i in range(1, int(np.ceil(np.max(etas))) + 1)])
         ax_1.tick_params(axis='y', which="both", labelcolor="tab:blue")
 
         ax_2 = ax_1.twinx()
