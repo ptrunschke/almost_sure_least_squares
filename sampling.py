@@ -312,12 +312,6 @@ if __name__ == "__main__":
             else:
                 x_max = np.quantile(values[0], 0.9)
                 x_max += 0.05 * (x_max - x_min)
-            # if index in [0, 2]:
-            #     x_min, x_max = np.min(values), np.quantile(values[0], 0.9)
-            #     x_min -= 0.05 * (x_max - x_min)
-            #     x_max += 0.05 * (x_max - x_min)
-            # else:
-            #     x_min, x_max = (0, 1)
             bins = np.linspace(x_min, x_max, 20)
             values = np.clip(values, x_min, x_max)
             ax[index].hist(list(values), bins=bins, density=True, label=sampler_names)
