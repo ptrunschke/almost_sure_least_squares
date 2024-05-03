@@ -110,8 +110,7 @@ if __name__ == "__main__":
         else:
             raise NotImplementedError()
 
-        tab20 = mpl.colormaps["tab20"].colors
-
+        # tab20 = mpl.colormaps["tab20"].colors
         # offset = 3
         # js = np.arange(nx)[offset:-offset].reshape(5, -1)[:, 0]
         # js = np.concatenate([js, [nx - offset]])
@@ -126,6 +125,7 @@ if __name__ == "__main__":
         #     plt.yscale("log")
         # plt.show()
 
+        # tab20 = mpl.colormaps["tab20"].colors
         # I, xs = compute_inner(space, domain, 2 ** 12)
         # L = sps.eye(I.shape[0], format="csc", dtype=float)
         # I = I.tocsc()
@@ -165,29 +165,28 @@ if __name__ == "__main__":
         # plt.legend()
         # plt.show()
 
-        ch = np.sum(M_onb ** 2, axis=0)
-        if space == "h10":
-            ch *= 0.5
-        elif space == "h1":
-            ch *= 0.5
+        if space in ["h10", "h1"]:
+            def rho(x):
+                return np.full(len(x), 0.5)
+
         elif space == "h1gauss":
             def rho(x):
                 return np.exp(-x**2 / 2) / np.sqrt(2 * np.pi)
 
-            ch *= rho(xs)
-
         normalise = lambda ys: ys / np.trapz(ys, xs)
 
+        ch = np.sum(M_onb ** 2, axis=0)
         kd = np.sum(I_onb ** 2, axis=0)
         k = reference_kernel(xs, xs)
         ratio = np.nan_to_num(kd / k)
 
+        plt.style.use('seaborn-v0_8-deep')
         fig, ax = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
-        ax.plot(xs, normalise(kd), color=tab20[0], label=r"$k_d(x,x)$")
-        ax.plot(xs, normalise(k), color=tab20[1], label=r"$k(x,x)$")
-        ax.plot(xs, normalise(ratio), color="tab:red", label=r"$\frac{k_d(x,x)}{k(x,x)}$")
+        ax.plot(xs, normalise(ratio), label=r"$\frac{k_d(x,x)}{k(x,x)}$")
+        ax.plot(xs, normalise(k * rho(xs)), label=r"$k(x,x) \rho(x)$")
+        ax.plot(xs, normalise(kd * rho(xs)), label=r"$k_d(x,x) \rho(x)$")
+        ax.plot(xs, normalise(ch * rho(xs)), label="Christoffel density")
         # plt.plot(xs, normalise(ratio * rho(xs)), color="tab:purple", label=r"$\frac{k_d(x,x)}{k(x,x)} \rho$")
-        ax.plot(xs, normalise(ch), color="k", linestyle="--", label="Christoffel density")
         ax.legend()
         ax.set_xlim(*initial_basis.domain)
         if space == "h10":
