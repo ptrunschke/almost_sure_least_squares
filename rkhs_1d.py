@@ -141,41 +141,6 @@ if __name__ == "__main__":
         #     plt.yscale("log")
         # plt.show()
 
-        # if space == "h10":
-        #     if basis == "polynomial":
-        #         def basisval(x):
-        #             values = monomval(x, np.eye(dimension))
-        #             return values * (x - 1) * (x + 1)
-        #     elif basis == "fourier":
-        #         def basisval(x):
-        #             x = (x - domain[0]) / (domain[1] - domain[0])
-        #             return np.sin(np.pi * x[None] * np.arange(1, dimension + 1)[:, None])
-        #     else:
-        #         raise NotImplementedError()
-        # else:
-        #     if basis == "polynomial":
-        #         def basisval(x):
-        #             return monomval(x, np.eye(dimension))
-        #     elif basis == "fourier":
-        #         def basisval(x):
-        #             x = (x - domain[0]) / (domain[1] - domain[0])
-        #             c = dimension // 2 + (dimension % 2)
-        #             s = dimension // 2
-        #             assert c + s == dimension
-        #             z = np.ones((1, len(x)))
-        #             c = np.cos(2 * np.pi * x[None] * np.arange(1, c)[:, None])
-        #             s = np.sin(2 * np.pi * x[None] * np.arange(1, s + 1)[:, None])
-        #             assert z.shape[0] + c.shape[0] + s.shape[0] == dimension
-        #             return np.concatenate([z, c, s], axis=0)
-        #     else:
-        #         raise NotImplementedError()
-
-        # xs = np.linspace(*domain, 1000)
-        # for e, b in enumerate(basisval(xs)):
-        #     plt.plot(xs, b, label=f"{e}")
-        # plt.legend()
-        # plt.show()
-
         if space == "h10":
             basisval = enforce_zero_trace(basisval)
 
@@ -187,6 +152,12 @@ if __name__ == "__main__":
 
         discrete_rkhs_gramian = compute_discrete_gramian(space, basisval.domain, 2 ** 13)
         rkhs_basis = orthonormalise(basisval, *discrete_rkhs_gramian)
+
+        # xs = np.linspace(*domain, 1000)
+        # for e, b in enumerate(rkhs_basis(xs)):
+        #     plt.plot(xs, b, label=f"{e}")
+        # plt.legend()
+        # plt.show()
 
         xs = np.linspace(*basisval.domain, 1002)[1:-1]  # remove the boundary points for the H10 case
         M_onb = l2_basis(xs)
