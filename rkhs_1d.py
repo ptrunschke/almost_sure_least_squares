@@ -1,70 +1,112 @@
-# coding: utf-8
+from abc import ABC, abstractmethod
+from typing import Any
+
 import numpy as np
 from scipy.special import erf
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 
 
-def h1_kernel(x, y):
-    domain = (-1, 1)
-    assert np.all((x >= domain[0]) & (x <= domain[1]))
-    assert np.all((y >= domain[0]) & (y <= domain[1]))
-    low = np.minimum(x, y)
-    high = np.maximum(x, y)
-    return np.cosh(low - domain[0]) * np.cosh(domain[1] - high) * (domain[1] - domain[0]) / np.sinh(domain[1] - domain[0])
+class Kernel(ABC):
+    @property
+    @abstractmethod
+    def domain(self) -> tuple[float, float]:
+        pass
 
-def h10_kernel(x, y):
-    domain = (-1, 1)
-    assert np.all((x >= domain[0]) & (x <= domain[1]))
-    assert np.all((y >= domain[0]) & (y <= domain[1]))
-    x = (x + 1) / 2
-    y = (y + 1) / 2
-    # 4 = 2 * 2, where one factor comes from the probability and the other comes from the transformation.
-    return 4 * np.where(x <= y, x * (1 - y), (1 - x) * y)
-    # If x <= y: (x + 1) / 2 * (1 - (y + 1) / 2) = (x + 1) * (1 - y) / 4
-    # If x >  y: (1 - (x + 1) / 2) * (y + 1) / 2 = (1 - x) * (y + 1) / 4
-    # --> (min(x, y) + 1) * (1 - max(x, y)) / 4
+    @abstractmethod
+    def __call__(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        pass
 
-def h1gauss_kernel(x, y):
-    low = np.minimum(x, y)
-    high = np.maximum(x, y)
-    sq_norm = x**2 + y**2
-    return np.sqrt(np.pi / 2) * np.exp(sq_norm / 2) * (1 + erf(low / np.sqrt(2))) * (1 - erf(high / np.sqrt(2)))
 
-def kernel_matrix(kernel, xs):
-    return kernel(xs[:, None], xs[None, :])
+class H1Kernel(Kernel):
+    def __init__(self, domain: tuple[float, float] = (-1, 1)):
+        self._domain = domain
+
+    @property
+    def domain(self) -> tuple[float, float]:
+        return self._domain
+
+    def __call__(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        domain = self.domain
+        assert np.all((x >= domain[0]) & (x <= domain[1]))
+        assert np.all((y >= domain[0]) & (y <= domain[1]))
+        low = np.minimum(x, y)
+        high = np.maximum(x, y)
+        return np.cosh(low - domain[0]) * np.cosh(domain[1] - high) * (domain[1] - domain[0]) / np.sinh(domain[1] - domain[0])
+
+
+class H10Kernel(Kernel):
+    def __init__(self, domain: tuple[float, float] = (-1, 1)):
+        self._domain = domain
+
+    @property
+    def domain(self) -> tuple[float, float]:
+        return self._domain
+
+    def __call__(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        domain = self.domain
+        assert np.all((x >= domain[0]) & (x <= domain[1]))
+        assert np.all((y >= domain[0]) & (y <= domain[1]))
+        d = domain[1] - domain[0]
+        x = (x - domain[0]) / d
+        y = (y - domain[0]) / d
+        return d ** 2 * np.where(x <= y, x * (1 - y), (1 - x) * y)
+
+
+class H1GaussKernel(Kernel):
+    def __init__(self, domain: tuple[float, float] = (-np.inf, np.inf)):
+        self._domain = domain
+
+    @property
+    def domain(self) -> tuple[float, float]:
+        return self._domain
+
+    def __call__(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
+        assert np.all((x >= self.domain[0]) & (x <= self.domain[1]))
+        assert np.all((y >= self.domain[0]) & (y <= self.domain[1]))
+        low = np.minimum(x, y)
+        high = np.maximum(x, y)
+        sq_norm = x**2 + y**2
+        return np.sqrt(np.pi / 2) * np.exp(sq_norm / 2) * (1 + erf(low / np.sqrt(2))) * (1 - erf(high / np.sqrt(2)))
+
+
+def kernel_matrix(kernel: Kernel, points: np.ndarray) -> np.ndarray:
+    assert points.ndim == 1
+    return kernel(points[:, None], points[None, :])
 
 
 if __name__ == "__main__":
     from pathlib import Path
-    from basis_1d import compute_inner, orthonormalise
+    from basis_1d import compute_discrete_gramian, orthonormalise, enforce_zero_trace, MonomialBasis, FourierBasis, SinBasis
 
-    dimension = 5
+    # dimension = 5
+    dimension = 10
     basis = "polynomial"
     # basis = "fourier"
-
-    def monomval(x, c, tensor=True):
-        assert tensor
-        dimension, *c_shape = c.shape
-        c = c.reshape(dimension, -1)
-        x_shape = x.shape
-        x = x.reshape(-1)
-        measures = x[None] ** np.arange(dimension)[:, None]
-        assert measures.shape == (dimension, x.size)
-        values = c.T @ measures
-        return values.reshape(*c_shape, *x_shape)
 
     for space in ["h10", "h1", "h1gauss"]:
         print(f"Computing marginal densities for {space} with {basis} basis")
         if space == "h10":
-            domain = (-1, 1)
-            reference_kernel = h10_kernel
+            reference_kernel = H10Kernel((-1, 1))
+            if basis == "polynomial":
+                basisval = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis == "fourier":
+                basisval = SinBasis(dimension, domain=(-1, 1))
         elif space == "h1":
-            domain = (-1, 1)
-            reference_kernel = h1_kernel
+            reference_kernel = H1Kernel((-1, 1))
+            if basis == "polynomial":
+                basisval = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis == "fourier":
+                basisval = FourierBasis(dimension, domain=(-1, 1))
         elif space == "h1gauss":
-            domain = (-5, 5)
-            reference_kernel = h1gauss_kernel
+            # reference_kernel = H1GaussKernel((-5, 5))
+            reference_kernel = H1GaussKernel((-8, 8))
+            if basis == "polynomial":
+                # basisval = MonomialBasis(dimension, domain=(-5, 5))
+                basisval = MonomialBasis(dimension, domain=(-8, 8))
+            elif basis == "fourier":
+                # basisval = FourierBasis(dimension, domain=(-5, 5))
+                basisval = FourierBasis(dimension, domain=(-8, 8))
         else:
             raise NotImplementedError()
 
@@ -99,34 +141,34 @@ if __name__ == "__main__":
         #     plt.yscale("log")
         # plt.show()
 
-        if space == "h10":
-            if basis == "polynomial":
-                def basisval(x):
-                    values = monomval(x, np.eye(dimension))
-                    return values * (x - 1) * (x + 1)
-            elif basis == "fourier":
-                def basisval(x):
-                    x = (x - domain[0]) / (domain[1] - domain[0])
-                    return np.sin(np.pi * x[None] * np.arange(1, dimension + 1)[:, None])
-            else:
-                raise NotImplementedError()
-        else:
-            if basis == "polynomial":
-                def basisval(x):
-                    return monomval(x, np.eye(dimension))
-            elif basis == "fourier":
-                def basisval(x):
-                    x = (x - domain[0]) / (domain[1] - domain[0])
-                    c = dimension // 2 + (dimension % 2)
-                    s = dimension // 2
-                    assert c + s == dimension
-                    z = np.ones((1, len(x)))
-                    c = np.cos(2 * np.pi * x[None] * np.arange(1, c)[:, None])
-                    s = np.sin(2 * np.pi * x[None] * np.arange(1, s + 1)[:, None])
-                    assert z.shape[0] + c.shape[0] + s.shape[0] == dimension
-                    return np.concatenate([z, c, s], axis=0)
-            else:
-                raise NotImplementedError()
+        # if space == "h10":
+        #     if basis == "polynomial":
+        #         def basisval(x):
+        #             values = monomval(x, np.eye(dimension))
+        #             return values * (x - 1) * (x + 1)
+        #     elif basis == "fourier":
+        #         def basisval(x):
+        #             x = (x - domain[0]) / (domain[1] - domain[0])
+        #             return np.sin(np.pi * x[None] * np.arange(1, dimension + 1)[:, None])
+        #     else:
+        #         raise NotImplementedError()
+        # else:
+        #     if basis == "polynomial":
+        #         def basisval(x):
+        #             return monomval(x, np.eye(dimension))
+        #     elif basis == "fourier":
+        #         def basisval(x):
+        #             x = (x - domain[0]) / (domain[1] - domain[0])
+        #             c = dimension // 2 + (dimension % 2)
+        #             s = dimension // 2
+        #             assert c + s == dimension
+        #             z = np.ones((1, len(x)))
+        #             c = np.cos(2 * np.pi * x[None] * np.arange(1, c)[:, None])
+        #             s = np.sin(2 * np.pi * x[None] * np.arange(1, s + 1)[:, None])
+        #             assert z.shape[0] + c.shape[0] + s.shape[0] == dimension
+        #             return np.concatenate([z, c, s], axis=0)
+        #     else:
+        #         raise NotImplementedError()
 
         # xs = np.linspace(*domain, 1000)
         # for e, b in enumerate(basisval(xs)):
@@ -134,14 +176,19 @@ if __name__ == "__main__":
         # plt.legend()
         # plt.show()
 
+        if space == "h10":
+            basisval = enforce_zero_trace(basisval)
+
         if space == "h1gauss":
-            l2_basis = orthonormalise(basisval, "l2gauss", domain, 2 ** 12)
+            discrete_l2_gramian = compute_discrete_gramian("l2gauss", basisval.domain, 2 ** 13)
         else:
-            l2_basis = orthonormalise(basisval, "l2", domain, 2 ** 12)
+            discrete_l2_gramian = compute_discrete_gramian("l2", basisval.domain, 2 ** 13)
+        l2_basis = orthonormalise(basisval, *discrete_l2_gramian)
 
-        rkhs_basis = orthonormalise(basisval, space, domain, 2 ** 12)
+        discrete_rkhs_gramian = compute_discrete_gramian(space, basisval.domain, 2 ** 13)
+        rkhs_basis = orthonormalise(basisval, *discrete_rkhs_gramian)
 
-        xs = np.linspace(*domain, 1002)[1:-1]  # remove the boundary points for the H10 case
+        xs = np.linspace(*basisval.domain, 1002)[1:-1]  # remove the boundary points for the H10 case
         M_onb = l2_basis(xs)
         I_onb = rkhs_basis(xs)
 
@@ -174,6 +221,7 @@ if __name__ == "__main__":
         # plt.plot(xs, normalise(ratio * rho(xs)), color="tab:purple", label=r"$\frac{k_d(x,x)}{k(x,x)} \rho$")
         ax.plot(xs, normalise(ch), color="k", linestyle="--", label="Christoffel density")
         ax.legend()
+        ax.set_xlim(*basisval.domain)
         if space == "h10":
             # plt.title(r"Polynomial basis for $H^1_0(-1, 1)$")
             pass
