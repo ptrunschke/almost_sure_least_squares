@@ -126,6 +126,7 @@ def draw_embedding_sample(
 def draw_volume_sample(
         rng: np.random.Generator,
         rkhs_kernel: Kernel,
+        reference_density: Density,
         discretisation: np.ndarray,
         *,
         plot: bool = False,
@@ -137,7 +138,7 @@ def draw_volume_sample(
     assert discretisation.ndim == 1 and conditioned_on.ndim == 1
 
     def density(points: np.ndarray) -> np.ndarray:
-        return bayes_kernel_variance(rkhs_kernel, points, conditioned_on)
+        return bayes_kernel_variance(rkhs_kernel, points, conditioned_on) * reference_density(points)
 
     if plot:
         plot_path = plot_directory / f"volume_density_step-{len(conditioned_on)+1}.png"
@@ -149,6 +150,7 @@ def draw_volume_sample(
 def draw_subspace_volume_sample(
         rng: np.random.Generator,
         subspace_basis: Basis,
+        reference_density: Density,
         discretisation: np.ndarray,
         *,
         plot: bool = False,
@@ -163,9 +165,13 @@ def draw_subspace_volume_sample(
         subspace_kernel = create_subspace_kernel(subspace_basis)
 
         def density(points: np.ndarray) -> np.ndarray:
-            return bayes_kernel_variance(subspace_kernel, points, conditioned_on)
+            return bayes_kernel_variance(subspace_kernel, points, conditioned_on) * reference_density(points)
     else:
-        density = compute_subspace_volume_marginal(subspace_basis)
+        christoffel_density = compute_subspace_volume_marginal(subspace_basis)
+
+        def density(points: np.ndarray) -> np.ndarray:
+            return christoffel_density(points) * reference_density(points)
+
 
     if plot:
         plot_path = plot_directory / f"subspace_volume_density_step-{len(conditioned_on)+1}.png"
@@ -237,6 +243,7 @@ if __name__ == "__main__":
     trials = 1_000
 
     for space in ["h10", "h1", "h1gauss"]:
+    # for space in ["h1gauss"]:
         print(f"Compute sample statistics for {space} with {basis_name} basis")
         if space == "h10":
             rkhs_kernel = H10Kernel((-1, 1))
@@ -281,15 +288,26 @@ if __name__ == "__main__":
         #     draw_volume_sample(rng, h1_kernel, discretisation, plot=True, conditioned_on=sample)
         #     draw_subspace_volume_sample(rng, h1_basis, discretisation, plot=True, conditioned_on=sample)
 
-        embedding_sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=rkhs_kernel, subspace_basis=rkhs_basis, discretisation=discretisation)
-        volume_sampler = partial(draw_volume_sample, rng=rng, rkhs_kernel=rkhs_kernel, discretisation=discretisation)
-        subspace_volume_sampler = partial(draw_subspace_volume_sample, rng=rng, subspace_basis=l2_basis, discretisation=discretisation)
+        if space in ["h10", "h1"]:
+            def rho(x):
+                return np.full(len(x), 0.5)
 
-        def marginal_embedding_sampler(conditioned_on: Optional[list[float]] = None) -> float:
-            return draw_sample(rng=rng, density=compute_embedding_marginal(rkhs_kernel, rkhs_basis), discretisation=discretisation)
+        elif space == "h1gauss":
+            def rho(x):
+                return np.exp(-x**2 / 2) / np.sqrt(2 * np.pi)
+
+        embedding_sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=rkhs_kernel, subspace_basis=rkhs_basis, discretisation=discretisation)
+        volume_sampler = partial(draw_volume_sample, rng=rng, rkhs_kernel=rkhs_kernel, reference_density=rho, discretisation=discretisation)
+        subspace_volume_sampler = partial(draw_subspace_volume_sample, rng=rng, subspace_basis=l2_basis, reference_density=rho, discretisation=discretisation)
+
+        # def marginal_embedding_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+        #     TODO: weighting...
+        #     return draw_sample(rng=rng, density=compute_embedding_marginal(rkhs_kernel, rkhs_basis), discretisation=discretisation)
 
         def marginal_subspace_volume_sampler(conditioned_on: Optional[list[float]] = None) -> float:
-            return draw_sample(rng=rng, density=compute_subspace_volume_marginal(l2_basis), discretisation=discretisation)
+            density = compute_subspace_volume_marginal(l2_basis)
+            weighted_density = lambda x: density(x) * rho(x)
+            return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
 
         # samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_embedding_sampler, marginal_subspace_volume_sampler]
         # sampler_names = ["Embedding sampler", "Volume sampler", "Subspace volume sampler", "Marginal embedding sampler", "Marginal subspace volume sampler"]
