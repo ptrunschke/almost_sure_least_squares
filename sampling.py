@@ -177,8 +177,11 @@ def draw_subspace_volume_sample(
 Sampler = Callable[[list[float]], float]
 
 
-def draw_sequence(sampler: Sampler, sample_size: int) -> np.ndarray:
-    sample = []
+def draw_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optional[list[float]] = None) -> np.ndarray:
+    if initial_sample is None:
+        sample = []
+    else:
+        sample = list(initial_sample)
     for _ in range(sample_size):
         sample.append(sampler(conditioned_on=sample))
     return sample
@@ -192,7 +195,7 @@ def kernel_gramian(kernel: Kernel, basis: Basis, points: np.ndarray, *, regulari
     M = basis(points)
     assert M.shape == (basis.dimension, len(points))
     es, vs = np.linalg.eigh(K)
-    assert np.allclose(vs * es @ vs.T, K)
+    assert np.max(abs(vs * es @ vs.T - K)) <= 1e-12 * np.max(abs(K))
     es = np.maximum(es, regularisation)
     M = M @ vs
     return M / es @ M.T
@@ -224,8 +227,6 @@ if __name__ == "__main__":
     basis_name = "polynomial"
     # basis_name = "fourier"
 
-    discretisation = np.linspace(-1, 1, 1000)
-
     # oversampling = 1
     # oversampling = 2
     oversampling = 10
@@ -243,6 +244,7 @@ if __name__ == "__main__":
                 initial_basis = MonomialBasis(dimension, domain=(-1, 1))
             elif basis_name == "fourier":
                 initial_basis = SinBasis(dimension, domain=(-1, 1))
+            initial_basis = enforce_zero_trace(initial_basis)
         elif space == "h1":
             rkhs_kernel = H1Kernel((-1, 1))
             if basis_name == "polynomial":
@@ -261,8 +263,7 @@ if __name__ == "__main__":
         else:
             raise NotImplementedError()
 
-        if space == "h10":
-            initial_basis = enforce_zero_trace(initial_basis)
+        discretisation = np.linspace(*initial_basis.domain, 1000)
 
         if space == "h1gauss":
             discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)

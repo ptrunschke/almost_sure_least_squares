@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import Any
 
 import numpy as np
 from scipy.special import erf
@@ -92,6 +91,7 @@ if __name__ == "__main__":
                 initial_basis = MonomialBasis(dimension, domain=(-1, 1))
             elif basis_name == "fourier":
                 initial_basis = SinBasis(dimension, domain=(-1, 1))
+            initial_basis = enforce_zero_trace(initial_basis)
         elif space == "h1":
             reference_kernel = H1Kernel((-1, 1))
             if basis_name == "polynomial":
@@ -140,9 +140,6 @@ if __name__ == "__main__":
         # if space == "h1gauss":
         #     plt.yscale("log")
         # plt.show()
-
-        if space == "h10":
-            initial_basis = enforce_zero_trace(initial_basis)
 
         if space == "h1gauss":
             discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)
