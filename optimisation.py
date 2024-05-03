@@ -1,220 +1,184 @@
+from collections.abc import Callable
 import numpy as np
 from tqdm import tqdm, trange
-
-from least_squares import mu_W
-# from sampling import Sampler
-from sampling_new import Sampler
+from basis_1d import Basis
+from rkhs_1d import Kernel
 
 
-def greedy_subsample(sample, sample_size, sampler):
-    while len(sample) > sample_size:
-        mus = []
-        for idx in range(len(sample)):
-            sample_without_idx = sample[:idx] + sample[idx + 1 :]
-            mus.append(mu_W(sample_without_idx, sampler.dimension, sampler.basis))
-        idx = np.argmin(mus)
-        sample = sample[:idx] + sample[idx + 1 :]
-    return sample
+Metric = Callable[[np.ndarray], float]
 
-def greedy_swap(sample, candidates):
-    mus = []
-    for idx in range(len(candidates)):
-        sample_with_idx = sample + [candidates[idx]]
-        mus.append(mu_W(sample_with_idx, sampler.dimension, sampler.basis))
-    idx = np.argmin(mus)
-    sample = sample + [candidates[idx]]
-    mus = []
-    for idx in range(len(sample)):
-        sample_without_idx = sample[:idx] + sample[idx + 1 :]
-        mus.append(mu_W(sample_without_idx, sampler.dimension, sampler.basis))
-    idx = np.argmin(mus)
-    sample = sample[:idx] + sample[idx + 1 :]
-    return sample
 
-def greedy_optimise(sample_or_size, sampler, rng, max_iterations=100, tolerance=1e-1):
-    if isinstance(sample_or_size, int):
-        sample = []
-        while len(sample) < sample_size:
-            sample.extend(sampler.draw(rng))
-        sample = sample[:sample_size]
-    else:
-        sample = sample_or_size
-    mu_W_new = mu_W(sample, sampler.dimension, sampler.basis)
-    for _ in range(max_iterations):
-        mu_W_old = mu_W_new
-        sample = greedy_swap(sample, sampler.draw(rng))
-        mu_W_new = mu_W(sample, sampler.dimension, sampler.basis)
-        assert mu_W_old >= mu_W_new
-        if mu_W_old - mu_W_new < tolerance:
-            break
-    return sample, mu_W_new
+def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
+    def lambda_(points: np.ndarray) -> float:
+        points = np.asarray(points)
+        assert points.ndim == 1
+        K = kernel(points[:, None], points[None, :])
+        bs = basis(points)
+        assert K.shape == (len(points), len(points)) and bs.shape == (basis.dimension, len(points))
+        # We want to compute lambda(x) = lambda_min(bs @ inv(K) @ bs.T).
+        cs = np.linalg.lstsq(K, bs.T, rcond=None)[0]
+        assert cs.shape == (len(points), basis.dimension)
+        return np.linalg.norm(bs @ cs, ord=-2)
+    return lambda_
 
-def greedy_optimise_mu(mu_bound, sampler, rng, verbose=False):
-    if verbose:
-        print("Create sample")
-    sample = list(sampler.draw(rng))
-    mu = mu_W(sample, sampler.dimension, sampler.basis)
-    if verbose:
-        print(f"Initial mu: {mu:.2f}  |  Sample size: {len(sample)}")
-    while mu > mu_bound:
-        sample.extend(sampler.draw(rng))
-        mu = mu_W(sample, sampler.dimension, sampler.basis)
-        if verbose:
-            print(f"New mu: {mu:.2f}  |  Sample size: {len(sample)}")
-    if verbose:
-        print("Start subsampling")
-    while True:
-        candidate = greedy_subsample(sample, len(sample)-1, sampler)
-        c_mu = mu_W(candidate, sampler.dimension, sampler.basis)
-        if c_mu > mu_bound:
-            break
-        sample = candidate
-        mu = c_mu
-        if verbose:
-            print(f"New mu: {mu:.2f}  |  Sample size: {len(sample)}")
-    return sample, mu
+
+def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
+    def eta(points: np.ndarray) -> float:
+        assert points.ndim == 1
+        K = kernel(points[:, None], points[None, :])
+        bs = basis(points)
+        assert K.shape == (len(points), len(points)) and bs.shape == (basis.dimension, len(points))
+        # We want to compute eta(x) = sum_j |P_{\mcal{V}_x} b[j]|_V^2 = sum_j |b[j]|_x^2 = sum_j bs[j] @ inv(K) @ bs[j].
+        # For this, we need to compute cs[j] := K(x)^{-1} b[j](x) = inv(K) @ bs[j] = (inv(K) @ bs.T).T[j].
+        cs = np.linalg.lstsq(K, bs.T, rcond=None)[0].T
+        assert cs.shape == (basis.dimension, len(points))
+        # Then eta(x) = sum_j bs[j] @ cs[j] = sum_{i,j} bs[j, i] * cs[j, i].
+        return np.sum(bs * cs)
+    return eta
+
+
+def greedy_step(metric: Metric, full_sample: np.ndarray, selected: list[int]) -> int:
+    assert np.ndim(full_sample) == 1
+    assert len(selected) == 0 or (0 <= min(selected) and max(selected) < len(full_sample))
+    candidates = np.full(len(full_sample), False)
+    candidates[selected] = True
+    etas = np.empty(len(full_sample))
+    for index in range(len(full_sample)):
+        if index in selected:
+            etas[index] = -np.inf
+        else:
+            candidates[index] = True
+            etas[index] = metric(full_sample[candidates])
+            candidates[index] = False
+    opt = np.argmax(etas)
+    return opt
+
 
 if __name__ == "__main__":
     from pathlib import Path
-    from plotting import plt
+    from functools import partial
 
-    plot_directory = Path(__file__).parent / "plot"
-    plot_directory.mkdir(exist_ok=True)
+    import matplotlib as mpl
+    import matplotlib.pyplot as plt
+    from tqdm import trange
 
-    dimension = 10
-    rank = 3 * dimension
-    discretisation = 1000
-
-    # sample_size = int(2.5 * dimension)
-    sample_size = dimension
+    from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel
+    from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis
+    from sampling import draw_embedding_sample, draw_sequence
 
     rng = np.random.default_rng(0)
-    sampler = Sampler(dimension, rank, discretisation)
 
-    sample = []
-    while len(sample) < sample_size:
-        sample.extend(sampler.draw(rng))
-    sample = sample[:sample_size]
+    # dimension = 5
+    dimension = 10
+    basis_name = "polynomial"
+    # basis_name = "fourier"
 
-    tqdm.write("Start optimisation")
-    tqdm.write(f"Initial quasi-optimality factor: {mu_W(sample, sampler.dimension, sampler.basis):.2f}")
-    for step in trange(10):
-        # sample.extend(sampler.draw(rng))
-        # sample = greedy_subsample(sample, sample_size, sampler)
-        sample = greedy_swap(sample, sampler.draw(rng))
-        tqdm.write(f"[{step}] Quasi-optimality factor: {mu_W(sample, sampler.dimension, sampler.basis):.2f}")
+    discretisation = np.linspace(-1, 1, 1000)
 
-    plot_path = plot_directory / "optimisation_statistics.png"
-    if not plot_path.exists():
-        trials = 1_000
-        samples = []
-        mus = []
+    full_sample_size = 100
+    # full_sample_size = 1000
+
+    max_subsample_size = 20
+    # max_subsample_size = full_sample_size
+
+    # trials = 2
+    trials = 10
+    # trials = 100
+
+    for space in ["h10"]:
+    # for space in ["h10", "h1", "h1gauss"]:
+        print(f"Compute subsample statistics for {space} with {basis_name} basis")
+        if space == "h10":
+            rkhs_kernel = H10Kernel((-1, 1))
+            if basis_name == "polynomial":
+                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis_name == "fourier":
+                initial_basis = SinBasis(dimension, domain=(-1, 1))
+            initial_basis = enforce_zero_trace(initial_basis)
+        elif space == "h1":
+            rkhs_kernel = H1Kernel((-1, 1))
+            if basis_name == "polynomial":
+                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis_name == "fourier":
+                initial_basis = FourierBasis(dimension, domain=(-1, 1))
+        elif space == "h1gauss":
+            # rkhs_kernel = H1GaussKernel((-5, 5))
+            rkhs_kernel = H1GaussKernel((-8, 8))
+            if basis_name == "polynomial":
+                # basisval = MonomialBasis(dimension, domain=(-5, 5))
+                initial_basis = MonomialBasis(dimension, domain=(-8, 8))
+            elif basis_name == "fourier":
+                # basisval = FourierBasis(dimension, domain=(-5, 5))
+                initial_basis = FourierBasis(dimension, domain=(-8, 8))
+        else:
+            raise NotImplementedError()
+
+        discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2 ** 13)
+        rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
+
+        embedding_sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=rkhs_kernel, subspace_basis=rkhs_basis, discretisation=discretisation)
+
+        eta = eta_metric(rkhs_kernel, rkhs_basis)
+        lambda_ = lambda_metric(rkhs_kernel, rkhs_basis)
+        mu = lambda points: 1 / np.sqrt(lambda_(points))
+
+        etas = np.empty((max_subsample_size, trials))
+        mus = np.empty((max_subsample_size, trials))
         for trial in trange(trials):
-            sample, mu = greedy_optimise(sample_size, sampler, rng)
-            samples.append(sample)
-            mus.append(mu)
+            print("Draw initial sample")
+            full_sample = draw_sequence(embedding_sampler, full_sample_size)
+            full_sample = np.asarray(full_sample)
+            assert full_sample.shape == (full_sample_size,)
+            mu_value = mu(full_sample)
+            print(f"Sample size: {len(full_sample)}  |  mu: {mu_value:.2e}")
 
-        fig, ax = plt.subplots(1, 2, figsize=(8, 4), dpi=300)
-        ax[0].hist(np.concatenate(samples), density=True, bins=80)
-        ax[0].set_title("Sample distribution")
-        ax[1].hist(mus, bins=25)
-        ax[1].set_title("Quasi-optimality factor")
-        print("Saving optimisation statistics plot to", plot_path)
+            print("Start subsampling (eta)")
+            selected = []
+            # for subsample_size in trange(len(full_sample)):
+            for subsample_size in trange(max_subsample_size):
+                selected.append(greedy_step(eta, full_sample, selected))
+                etas[subsample_size, trial] = eta(full_sample[selected])
+                mus[subsample_size, trial] = mu(full_sample[selected])
+
+        tab20 = mpl.colormaps["tab20"].colors
+        fig, ax_1 = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
+        positions = np.arange(1, max_subsample_size+1)
+        parts = ax_1.violinplot(etas.T, positions=positions-0.15, widths=0.35)
+        print(parts.keys())
+        for pc in parts['bodies']:
+            # pc.set_edgecolor(tab20[0])
+            pc.set_facecolor(tab20[1])
+            pc.set_alpha(1)
+        for key in parts.keys():
+            if key == "bodies":
+                continue
+            parts[key].set_color(tab20[0])
+            pc.set_alpha(1)
+        ax_1.set_yscale("log")
+        ax_1.set_ylabel(r"$\eta$", color="tab:blue", rotation=0)
+        ax_1.set_xlabel("sample size")
+        ax_1.tick_params(axis='y', labelcolor="tab:blue")
+        ax_2 = ax_1.twinx()
+        parts = ax_2.violinplot(mus.T, positions=positions+0.15, widths=0.35)
+        for pc in parts["bodies"]:
+            # pc.set_edgecolor(tab20[6])
+            pc.set_facecolor(tab20[7])
+            pc.set_alpha(1)
+        for key in parts.keys():
+            if key == "bodies":
+                continue
+            parts[key].set_color(tab20[6])
+            pc.set_alpha(1)
+        ax_2.set_yscale("log")
+        ax_2.set_ylabel(r"$\mu$", color="tab:red", rotation=0)
+        ax_2.tick_params(axis='y', labelcolor="tab:red")
+        ax_1.set_xticks(np.arange(1, max_subsample_size+1, max_subsample_size // 9))
+
+        plot_directory = Path(__file__).parent / "plot"
+        plot_directory.mkdir(exist_ok=True)
+        plot_path = plot_directory / f"subsample_statistics_{space}_{basis_name}.png"
+        print("Saving subsample statistics plot to", plot_path)
         plt.savefig(
             plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
         )
         plt.close(fig)
-
-    trials = 1_000
-    samples = []
-    mus = []
-    for trial in trange(trials):
-        sample, mu = greedy_optimise_mu(2, sampler, rng)
-        samples.append(sample)
-        mus.append(mu)
-
-    plot_path = plot_directory / "optimisation_statistics_sample_size.png"
-    if not plot_path.exists():
-        fig, ax = plt.subplots(1, 3, figsize=(8, 4), dpi=300)
-        ax[0].hist(np.concatenate(samples), density=True, bins=80)
-        ax[0].set_title("Sample distribution")
-        ax[1].hist(mus, bins=25)
-        ax[1].set_title("Quasi-optimality factor")
-        ax[2].hist([len(sample) for sample in samples], bins=25)
-        ax[2].set_title("Sample size")
-        print("Saving optimisation statistics plot to", plot_path)
-        plt.savefig(
-            plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
-        )
-        plt.close(fig)
-
-    from legendre import hk_gramian, orthonormal_basis
-    from least_squares import optimal_least_squares
-
-    # aspired_target = lambda x: np.sin(2 * np.pi * x) + np.cos(2 * dimension * np.pi * x)
-    # target_name = "wave"
-    # target_dimension = 14
-    # aspired_target = np.exp
-    # target_name = "exp"
-    # target_dimension = 14
-    # target_name = "random"
-    # target_dimension = 30
-    target_name = "ones"
-    target_dimension = 30
-    assert target_dimension >= dimension
-
-    xs = np.linspace(-1, 1, 10_000)
-    def h1_inner(f, g, xs):
-        fx = f(xs)
-        gx = g(xs)
-        l2_inner = np.trapz(fx * gx, xs)
-        dx = np.diff(xs)
-        dfx = np.diff(fx) / dx
-        dgx = np.diff(gx) / dx
-        h10_inner = (dfx * dgx) @ dx
-        return l2_inner + h10_inner
-
-    h1_gramian = hk_gramian(target_dimension, 1)
-    h1_legendre = orthonormal_basis(h1_gramian)
-    if target_name == "random":
-        target_coefficients = rng.normal(size=target_dimension)
-    elif target_name == "ones":
-        target_coefficients = np.ones(target_dimension)
-    else:
-        target_coefficients = np.zeros(target_dimension)
-        e = lambda k: np.eye(1, target_dimension, k=k)[0]
-        for dim in range(target_dimension):
-            basis_function = lambda x: h1_legendre(x, e(dim))
-            target_coefficients[dim] = h1_inner(aspired_target, basis_function, xs)
-
-    target = lambda x: h1_legendre(x, target_coefficients)
-
-    def h1_error(f, g, xs):
-        fx = f(xs)
-        gx = g(xs)
-        l2_error_sqr = np.trapz((fx - gx)**2, xs)
-        dx = np.diff(xs)
-        dfx = np.diff(fx) / dx
-        dgx = np.diff(gx) / dx
-        h10_error_sqr = (dfx - dgx)**2 @ dx
-        return np.sqrt(l2_error_sqr + h10_error_sqr)
-
-    min_error = np.linalg.norm(target_coefficients[dimension:])
-    mus_empirical = []
-    for sample in samples:
-        coefs = optimal_least_squares(target, sample, sampler.dimension, sampler.basis)
-        error = np.sqrt(np.linalg.norm(target_coefficients[:dimension] - coefs)**2 + min_error**2)
-        # error <= (1 + 2 * mu) * approximation_error
-        # --> (error / approximation_error - 1) / 2 <= mu
-        mu_emp = (error / min_error - 1) / 2
-        mus_empirical.append(mu_emp)
-
-    plot_path = plot_directory / f"optimal_sampled_least_squares_{target_name}.png"
-    fig, ax = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
-    ax.hist(mus_empirical, density=True, bins=25)
-    ax.set_title("Empirical quasi-optimality factor")
-    print("Saving optimisation statistics plot to", plot_path)
-    plt.savefig(
-        plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
-    )
-    plt.close(fig)
