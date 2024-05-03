@@ -3,7 +3,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
-
+from tqdm import trange
 
 from basis_1d import Basis, create_subspace_kernel
 from rkhs_1d import Kernel
@@ -177,12 +177,13 @@ def draw_subspace_volume_sample(
 Sampler = Callable[[list[float]], float]
 
 
-def draw_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optional[list[float]] = None) -> np.ndarray:
+def draw_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optional[list[float]] = None, verbose: bool = False) -> np.ndarray:
     if initial_sample is None:
         sample = []
     else:
         sample = list(initial_sample)
-    for _ in range(sample_size):
+    _range = trange if verbose else range
+    for _ in _range(sample_size):
         sample.append(sampler(conditioned_on=sample))
     return sample
 
@@ -215,7 +216,6 @@ if __name__ == "__main__":
     from functools import partial
 
     import matplotlib.pyplot as plt
-    from tqdm import trange
 
     from rkhs_1d import kernel_matrix, H10Kernel, H1Kernel, H1GaussKernel
     from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis
