@@ -81,32 +81,32 @@ if __name__ == "__main__":
 
     # dimension = 5
     dimension = 10
-    basis = "polynomial"
-    # basis = "fourier"
+    basis_name = "polynomial"
+    # basis_name = "fourier"
 
     for space in ["h10", "h1", "h1gauss"]:
-        print(f"Computing marginal densities for {space} with {basis} basis")
+        print(f"Computing marginal densities for {space} with {basis_name} basis")
         if space == "h10":
             reference_kernel = H10Kernel((-1, 1))
-            if basis == "polynomial":
-                basisval = MonomialBasis(dimension, domain=(-1, 1))
-            elif basis == "fourier":
-                basisval = SinBasis(dimension, domain=(-1, 1))
+            if basis_name == "polynomial":
+                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis_name == "fourier":
+                initial_basis = SinBasis(dimension, domain=(-1, 1))
         elif space == "h1":
             reference_kernel = H1Kernel((-1, 1))
-            if basis == "polynomial":
-                basisval = MonomialBasis(dimension, domain=(-1, 1))
-            elif basis == "fourier":
-                basisval = FourierBasis(dimension, domain=(-1, 1))
+            if basis_name == "polynomial":
+                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis_name == "fourier":
+                initial_basis = FourierBasis(dimension, domain=(-1, 1))
         elif space == "h1gauss":
             # reference_kernel = H1GaussKernel((-5, 5))
             reference_kernel = H1GaussKernel((-8, 8))
-            if basis == "polynomial":
+            if basis_name == "polynomial":
                 # basisval = MonomialBasis(dimension, domain=(-5, 5))
-                basisval = MonomialBasis(dimension, domain=(-8, 8))
-            elif basis == "fourier":
+                initial_basis = MonomialBasis(dimension, domain=(-8, 8))
+            elif basis_name == "fourier":
                 # basisval = FourierBasis(dimension, domain=(-5, 5))
-                basisval = FourierBasis(dimension, domain=(-8, 8))
+                initial_basis = FourierBasis(dimension, domain=(-8, 8))
         else:
             raise NotImplementedError()
 
@@ -142,16 +142,16 @@ if __name__ == "__main__":
         # plt.show()
 
         if space == "h10":
-            basisval = enforce_zero_trace(basisval)
+            initial_basis = enforce_zero_trace(initial_basis)
 
         if space == "h1gauss":
-            discrete_l2_gramian = compute_discrete_gramian("l2gauss", basisval.domain, 2 ** 13)
+            discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)
         else:
-            discrete_l2_gramian = compute_discrete_gramian("l2", basisval.domain, 2 ** 13)
-        l2_basis = orthonormalise(basisval, *discrete_l2_gramian)
+            discrete_l2_gramian = compute_discrete_gramian("l2", initial_basis.domain, 2 ** 13)
+        l2_basis = orthonormalise(initial_basis, *discrete_l2_gramian)
 
-        discrete_rkhs_gramian = compute_discrete_gramian(space, basisval.domain, 2 ** 13)
-        rkhs_basis = orthonormalise(basisval, *discrete_rkhs_gramian)
+        discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2 ** 13)
+        rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
 
         # xs = np.linspace(*domain, 1000)
         # for e, b in enumerate(rkhs_basis(xs)):
@@ -159,7 +159,7 @@ if __name__ == "__main__":
         # plt.legend()
         # plt.show()
 
-        xs = np.linspace(*basisval.domain, 1002)[1:-1]  # remove the boundary points for the H10 case
+        xs = np.linspace(*initial_basis.domain, 1002)[1:-1]  # remove the boundary points for the H10 case
         M_onb = l2_basis(xs)
         I_onb = rkhs_basis(xs)
 
@@ -192,7 +192,7 @@ if __name__ == "__main__":
         # plt.plot(xs, normalise(ratio * rho(xs)), color="tab:purple", label=r"$\frac{k_d(x,x)}{k(x,x)} \rho$")
         ax.plot(xs, normalise(ch), color="k", linestyle="--", label="Christoffel density")
         ax.legend()
-        ax.set_xlim(*basisval.domain)
+        ax.set_xlim(*initial_basis.domain)
         if space == "h10":
             # plt.title(r"Polynomial basis for $H^1_0(-1, 1)$")
             pass
@@ -205,7 +205,7 @@ if __name__ == "__main__":
 
         plot_directory = Path(__file__).parent / "plot"
         plot_directory.mkdir(exist_ok=True)
-        plot_path = plot_directory / f"marginal_{space}_{basis}.png"
+        plot_path = plot_directory / f"marginal_{space}_{basis_name}.png"
         print("Saving sample statistics plot to", plot_path)
         plt.savefig(
             plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
