@@ -184,6 +184,29 @@ def draw_sequence(sampler: Sampler, sample_size: int) -> np.ndarray:
     return sample
 
 
+def kernel_gramian(kernel: Kernel, basis: Basis, points: np.ndarray, *, regularisation: float = 1e-8) -> np.ndarray:
+    points = np.asarray(points)
+    assert points.ndim == 1
+    K = kernel_matrix(kernel, points)
+    assert K.shape == (len(points), len(points))
+    M = basis(points)
+    assert M.shape == (basis.dimension, len(points))
+    es, vs = np.linalg.eigh(K)
+    assert np.allclose(vs * es @ vs.T, K)
+    es = np.maximum(es, regularisation)
+    M = M @ vs
+    return M / es @ M.T
+
+
+def quasi_optimality_constants(kernel: Kernel, basis: Basis, points: np.ndarray) -> tuple[float, float, float]:
+    G = kernel_gramian(kernel, basis, points)
+    assert G.shape == (basis.dimension, basis.dimension)
+    I = np.eye(basis.dimension)
+    mu = 1 / np.sqrt(np.linalg.norm(G, ord=-2))
+    tau = min(np.linalg.norm(I - G, ord="fro"), 1.0)
+    assert np.isfinite(mu) and np.isfinite(tau)
+    return mu, tau, (1 + (mu * tau)**2)
+
 
 if __name__ == "__main__":
     from functools import partial
@@ -191,111 +214,122 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from tqdm import trange
 
-    from rkhs_1d import H1Kernel, kernel_matrix
-    from basis_1d import MonomialBasis, compute_discrete_gramian, orthonormalise
+    from rkhs_1d import kernel_matrix, H10Kernel, H1Kernel, H1GaussKernel
+    from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis
 
     rng = np.random.default_rng(0)
 
-    h1_kernel = H1Kernel((-1, 1))
-
+    # dimension = 5
     dimension = 10
-    basis = MonomialBasis(dimension, domain=(-1, 1))
-    discrete_l2_gramian = compute_discrete_gramian("l2", basis.domain, 2 ** 12)
-    l2_basis = orthonormalise(basis, *discrete_l2_gramian)
-    discrete_h1_gramian = compute_discrete_gramian("h1", basis.domain, 2 ** 12)
-    h1_basis = orthonormalise(basis, *discrete_h1_gramian)
+    basis_name = "polynomial"
+    # basis_name = "fourier"
 
     discretisation = np.linspace(-1, 1, 1000)
 
-    # for _ in range(2 * dimension):
-    #     draw_embedding_sample(rng, h1_kernel, h1_basis, discretisation, plot=True, conditioned_on=sample, regularisation=1e-8)
+    # oversampling = 1
+    # oversampling = 2
+    oversampling = 10
+    sample_size = oversampling * dimension
 
-    # for _ in range(dimension):
-    #     draw_volume_sample(rng, h1_kernel, discretisation, plot=True, conditioned_on=sample)
-    #     draw_subspace_volume_sample(rng, h1_basis, discretisation, plot=True, conditioned_on=sample)
-
-    def kernel_gramian(kernel: Kernel, basis: Basis, points: np.ndarray) -> np.ndarray:
-        points = np.asarray(points)
-        assert points.ndim == 1
-        K = kernel_matrix(kernel, points)
-        assert K.shape == (len(points), len(points))
-        M = basis(points)
-        assert M.shape == (basis.dimension, len(points))
-        es, vs = np.linalg.eigh(K)
-        assert np.allclose(vs * es @ vs.T, K)
-        M = M @ vs
-        return M / es @ M.T
-
-    def quasi_optimality_constants(kernel: Kernel, basis: Basis, points: np.ndarray) -> tuple[float, float, float]:
-        G = kernel_gramian(kernel, basis, points)
-        assert G.shape == (basis.dimension, basis.dimension)
-        I = np.eye(basis.dimension)
-        mu = 1 / np.sqrt(np.linalg.norm(G, ord=-2))
-        tau = min(np.linalg.norm(I - G, ord="fro"), 1.0)
-        return mu, tau, (1 + (mu * tau)**2)
-
-    sample_size = 10
-    # sample_size = 20
-    # sample_size = 100
     # trials = 10
     # trials = 100
     trials = 1_000
 
-    oversampling = sample_size / dimension
-    assert int(oversampling) == oversampling
-    oversampling = int(oversampling)
+    for space in ["h10", "h1", "h1gauss"]:
+        print(f"Compute sample statistics for {space} with {basis_name} basis")
+        if space == "h10":
+            rkhs_kernel = H10Kernel((-1, 1))
+            if basis_name == "polynomial":
+                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis_name == "fourier":
+                initial_basis = SinBasis(dimension, domain=(-1, 1))
+        elif space == "h1":
+            rkhs_kernel = H1Kernel((-1, 1))
+            if basis_name == "polynomial":
+                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+            elif basis_name == "fourier":
+                initial_basis = FourierBasis(dimension, domain=(-1, 1))
+        elif space == "h1gauss":
+            # rkhs_kernel = H1GaussKernel((-5, 5))
+            rkhs_kernel = H1GaussKernel((-8, 8))
+            if basis_name == "polynomial":
+                # basisval = MonomialBasis(dimension, domain=(-5, 5))
+                initial_basis = MonomialBasis(dimension, domain=(-8, 8))
+            elif basis_name == "fourier":
+                # basisval = FourierBasis(dimension, domain=(-5, 5))
+                initial_basis = FourierBasis(dimension, domain=(-8, 8))
+        else:
+            raise NotImplementedError()
 
-    embedding_sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=h1_kernel, subspace_basis=h1_basis, discretisation=discretisation)
-    volume_sampler = partial(draw_volume_sample, rng=rng, rkhs_kernel=h1_kernel, discretisation=discretisation)
-    subspace_volume_sampler = partial(draw_subspace_volume_sample, rng=rng, subspace_basis=l2_basis, discretisation=discretisation)
+        if space == "h10":
+            initial_basis = enforce_zero_trace(initial_basis)
 
-    def marginal_embedding_sampler(conditioned_on: Optional[list[float]] = None) -> float:
-        return draw_sample(rng=rng, density=compute_embedding_marginal(h1_kernel, h1_basis), discretisation=discretisation)
+        if space == "h1gauss":
+            discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)
+        else:
+            discrete_l2_gramian = compute_discrete_gramian("l2", initial_basis.domain, 2 ** 13)
+        l2_basis = orthonormalise(initial_basis, *discrete_l2_gramian)
 
-    def marginal_subspace_volume_sampler(conditioned_on: Optional[list[float]] = None) -> float:
-        return draw_sample(rng=rng, density=compute_subspace_volume_marginal(l2_basis), discretisation=discretisation)
+        discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2 ** 13)
+        rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
 
-    # samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_embedding_sampler, marginal_subspace_volume_sampler]
-    # sampler_names = ["Embedding sampler", "Volume sampler", "Subspace volume sampler", "Marginal embedding sampler", "Marginal subspace volume sampler"]
-    samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_subspace_volume_sampler]
-    sampler_names = ["Embedding sampling", "Volume sampling", "Subspace volume sampling", "Christoffel sampling"]
-    constants = np.empty((len(samplers), trials, 3))
-    for index in range(len(samplers)):
-        print(f"Sampling scheme: {sampler_names[index]}")
-        for trial in trange(trials):
-            sample = draw_sequence(samplers[index], sample_size)
-            constants[index, trial] = quasi_optimality_constants(h1_kernel, h1_basis, sample)
+        # for _ in range(2 * dimension):
+        #     draw_embedding_sample(rng, h1_kernel, h1_basis, discretisation, plot=True, conditioned_on=sample, regularisation=1e-8)
 
+        # for _ in range(dimension):
+        #     draw_volume_sample(rng, h1_kernel, discretisation, plot=True, conditioned_on=sample)
+        #     draw_subspace_volume_sample(rng, h1_basis, discretisation, plot=True, conditioned_on=sample)
 
-    plot_directory = Path(__file__).parent / "plot"
-    plot_directory.mkdir(exist_ok=True)
-    plot_path = plot_directory / f"sample_statistics_{oversampling}x.png"
+        embedding_sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=rkhs_kernel, subspace_basis=rkhs_basis, discretisation=discretisation)
+        volume_sampler = partial(draw_volume_sample, rng=rng, rkhs_kernel=rkhs_kernel, discretisation=discretisation)
+        subspace_volume_sampler = partial(draw_subspace_volume_sample, rng=rng, subspace_basis=l2_basis, discretisation=discretisation)
 
-    plt.style.use('seaborn-v0_8-deep')
-    fig, ax = plt.subplots(1, 3, figsize=(12, 4), dpi=300)
-    if oversampling == 1:
-        bounds = [(1, 20), (0, 1), (1, 100)]
-    elif oversampling == 2:
-        bounds = [(1, 10), (0, 1), (1, 50)]
-    elif oversampling == 10:
-        bounds = [(1, 2.5), (0, 1), (1, 5)]
-    else:
-        raise NotImplementedError()
-    for index, statistic in enumerate([r"$\mu$", r"$\tau$", r"$1 + \mu^2\tau^2$"]):
-        values = constants[..., index]
-        assert values.shape == (len(samplers), trials)
-        # x_min, x_max = np.min(values), np.quantile(values, 0.9)
-        # x_min -= 0.05 * (x_max - x_min)
-        # x_max += 0.05 * (x_max - x_min)
-        x_min, x_max = bounds[index]
-        bins = np.linspace(x_min, x_max, 20)
-        values = np.clip(values, x_min, x_max)
-        ax[index].hist(list(values), bins=bins, density=True, label=sampler_names)
-        # ax[index].hist(list(c1s), bins=bins, density=True, histtype='step', stacked=True, fill=False, label=sampler_names)
-        ax[index].set_title(statistic)
-        ax[index].legend(fontsize=8)
-    print("Saving sample statistics plot to", plot_path)
-    plt.savefig(
-        plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
-    )
-    plt.close(fig)
+        def marginal_embedding_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+            return draw_sample(rng=rng, density=compute_embedding_marginal(rkhs_kernel, rkhs_basis), discretisation=discretisation)
+
+        def marginal_subspace_volume_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+            return draw_sample(rng=rng, density=compute_subspace_volume_marginal(l2_basis), discretisation=discretisation)
+
+        # samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_embedding_sampler, marginal_subspace_volume_sampler]
+        # sampler_names = ["Embedding sampler", "Volume sampler", "Subspace volume sampler", "Marginal embedding sampler", "Marginal subspace volume sampler"]
+        samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_subspace_volume_sampler]
+        sampler_names = ["Embedding sampling", "Volume sampling", "Subspace volume sampling", "Christoffel sampling"]
+        constants = np.empty((len(samplers), trials, 3))
+        for index in range(len(samplers)):
+            print(f"Sampling scheme: {sampler_names[index]}")
+            for trial in trange(trials):
+                sample = draw_sequence(samplers[index], sample_size)
+                constants[index, trial] = quasi_optimality_constants(rkhs_kernel, rkhs_basis, sample)
+
+        plt.style.use('seaborn-v0_8-deep')
+        fig, ax = plt.subplots(1, 3, figsize=(12, 4), dpi=300)
+        for index, statistic in enumerate([r"$\mu$", r"$\tau$", r"$1 + \mu^2\tau^2$"]):
+            values = constants[..., index]
+            assert values.shape == (len(samplers), trials)
+            x_min = [1, 0, 1][index]
+            if index == 1:
+                x_max = 1
+            else:
+                x_max = np.quantile(values[0], 0.9)
+                x_max += 0.05 * (x_max - x_min)
+            # if index in [0, 2]:
+            #     x_min, x_max = np.min(values), np.quantile(values[0], 0.9)
+            #     x_min -= 0.05 * (x_max - x_min)
+            #     x_max += 0.05 * (x_max - x_min)
+            # else:
+            #     x_min, x_max = (0, 1)
+            bins = np.linspace(x_min, x_max, 20)
+            values = np.clip(values, x_min, x_max)
+            ax[index].hist(list(values), bins=bins, density=True, label=sampler_names)
+            # ax[index].hist(list(c1s), bins=bins, density=True, histtype='step', stacked=True, fill=False, label=sampler_names)
+            ax[index].set_title(statistic)
+            ax[index].legend(fontsize=8)
+
+        plot_directory = Path(__file__).parent / "plot"
+        plot_directory.mkdir(exist_ok=True)
+        plot_path = plot_directory / f"sample_statistics_{space}_{basis_name}_{oversampling}x.png"
+        print("Saving sample statistics plot to", plot_path)
+        plt.savefig(
+            plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
+        )
+        plt.close(fig)
