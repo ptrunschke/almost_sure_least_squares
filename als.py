@@ -2,6 +2,7 @@ from __future__ import annotations
 from typing import Optional
 import numpy as np
 from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel, Kernel, kernel_matrix
+from rkhs_nd import TensorProductKernel
 from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis, TransformedBasis, Basis
 from sampling import draw_sample, draw_weighted_sequence, Sampler
 from greedy_subsampling import eta_metric, lambda_metric, greedy_step, Metric
@@ -200,23 +201,6 @@ class CoreBasis(Basis):
             return np.einsum("re,di,ei -> dri", self.tt[1], *bs).reshape(self.dimension, len(points))
         else:
             return np.einsum("dr,di,ei -> eri", self.tt[0], *bs).reshape(self.dimension, len(points))
-
-
-class TensorProductKernel(Kernel):
-    def __init__(self, *kernels: Kernel):
-        self.kernels = kernels
-
-    @property
-    def domain(self) -> list[tuple[float, float]]:
-        return [k.domain for k in self.kernels]
-
-    def __call__(self, x: np.ndarray, y: np.ndarray) -> np.ndarray:
-        assert x.ndim >= 2 and y.ndim >= 2 and x.shape[-1] == len(self.kernels)
-        assert x.shape[-1] == y.shape[-1]
-        res = 1
-        for i, k in enumerate(self.kernels):
-            res *= k(x[..., i], y[..., i])
-        return res
 
 
 product_kernel = TensorProductKernel(rkhs_kernel, rkhs_kernel)
