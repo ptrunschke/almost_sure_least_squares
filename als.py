@@ -1,14 +1,9 @@
 from __future__ import annotations
 from typing import Optional
 import numpy as np
-from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel, Kernel, kernel_matrix
-from rkhs_nd import TensorProductKernel
-from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis, TransformedBasis, Basis
+from basis_1d import TransformedBasis, Basis
 from sampling import draw_sample, draw_weighted_sequence, Sampler
-from greedy_subsampling import eta_metric, lambda_metric, greedy_step, Metric
-from least_squares import optimal_least_squares
-
-rng = np.random.default_rng(0)
+from greedy_subsampling import greedy_step, Metric
 
 
 def greedy_bound(selection_metric: Metric, target_metric: Metric, target: float, full_sample: np.ndarray, selected: Optional[list[int]] = None) -> tuple[list[int], float]:
@@ -71,13 +66,13 @@ def move_core(tt: TensorTrain, position: int):
         raise ValueError(f"Invalid position '{position}'")
 
 
-def evaluate(tt: TensorTrain, points: np.ndarray) -> np.ndarray:
+def evaluate(tt: TensorTrain, bases: list[Basis], points: np.ndarray) -> np.ndarray:
     assert points.ndim == 2 and points.shape[1] == len(tt)
     assert len(tt) == 2
-    lbs = rkhs_basis(points[:, 0])
-    assert lbs.shape == (dimension, len(points))
-    rbs = rkhs_basis(points[:, 1])
-    assert rbs.shape == (dimension, len(points))
+    lbs = bases[0](points[:, 0])
+    assert lbs.shape == (bases[0].dimension, len(points))
+    rbs = bases[1](points[:, 1])
+    assert rbs.shape == (bases[1].dimension, len(points))
     return np.einsum("dr,re,di,ei -> i", *tt, lbs, rbs)
 
 
@@ -150,6 +145,16 @@ def quasi_projection(points: np.ndarray, values: np.ndarray, weights: np.ndarray
 
 
 if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+
+    from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel, kernel_matrix
+    from rkhs_nd import TensorProductKernel
+    from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis
+    from greedy_subsampling import eta_metric, lambda_metric, lambda_to_mu, mu_to_lambda, suboptimality_metric
+    from least_squares import optimal_least_squares
+
+    rng = np.random.default_rng(0)
+
     # dimension = 5
     dimension = 10
     basis_name = "polynomial"
@@ -175,10 +180,9 @@ if __name__ == "__main__":
     #     return (1 + points @ cs)**(-(len(cs) + 1))
 
     def target(points: np.ndarray) -> np.ndarray:
+        # Anthony's test function
         points = np.asarray(points)
         points = (points + 1) / 2  # transform points to interval [0, 1]
-        # return points[:, 1] / (points[:, 0] + 1e-3)
-        # return np.cos(points[:, 0] + points[:, 1]) * np.exp(points[:, 0] * points[:, 1])
         return 1 / (1 + np.sum(points, axis=1))
 
     # Original algorithm
@@ -259,10 +263,6 @@ if __name__ == "__main__":
 
     tt: TensorTrain = [rng.standard_normal(size=(dimension, rank)), rng.standard_normal(size=(rank, dimension))]
 
-    target_lambda = 1 / target_mu**2  # mu = lambda points: 1 / np.sqrt(lambda_(points))
-    lambda_to_mu = lambda l: 1 / np.sqrt(l)
-
-
     if space in ["h1", "h10"]:
         test_sample = rng.uniform(-1, 1, size=(10000, 2))
     elif space == "h1gauss":
@@ -270,6 +270,11 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError()
     test_values = target(test_sample)
+
+    def compute_test_error(tt: TensorTrain) -> float:
+        prediction = evaluate(tt, [rkhs_basis]*len(tt), test_sample)
+        assert prediction.shape == test_values.shape
+        return np.linalg.norm(prediction - test_values, ord=2) / np.linalg.norm(test_values, ord=2)
 
     full_sample = np.empty(shape=(0, 2), dtype=float)
     full_values = np.empty(shape=(0,), dtype=float)
@@ -291,40 +296,22 @@ if __name__ == "__main__":
             core = tt[0].reshape(-1)
         else:
             core = tt[1].T.reshape(-1)
-        assert np.allclose(core_basis(test_sample).T @ core, evaluate(tt, test_sample))
-        test_error = core_basis(test_sample).T @ core - test_values
-        assert test_error.shape == test_values.shape
-        test_error = np.linalg.norm(test_error, ord=2) / np.linalg.norm(test_values, ord=2)
-        print(f"Relative test set error: {test_error:.2e}")
+        assert np.allclose(core_basis(test_sample).T @ core, evaluate(tt, [rkhs_basis]*2, test_sample))
+        test_error = compute_test_error(tt)
         errors.append(test_error)
         sample_sizes.append(len(full_sample))
+        print(f"Relative test set error: {test_error:.2e}")
 
         eta = eta_metric(product_kernel, core_basis)
         lambda_ = lambda_metric(product_kernel, core_basis)
+        suboptimality = suboptimality_metric(product_kernel, core_basis)
 
-        def suboptimality(points: np.ndarray) -> float:
-            points = np.asarray(points)
-            assert points.ndim >= 1
-            K = product_kernel(points[:, None], points[None, :])
-            assert K.shape == (len(points), len(points))
-            M = core_basis(points)
-            assert M.shape == (core_basis.dimension, len(points))
-            # We first compute G = bs @ inv(K) @ bs.T.
-            G = np.linalg.lstsq(K, M.T, rcond=None)[0]
-            assert G.shape == (len(points), core_basis.dimension)
-            G = M @ G
-            mu_squared = 1 / min(max(np.linalg.norm(G, ord=-2), 0), 1)
-            I = np.eye(core_basis.dimension)
-            tau = min(np.linalg.norm(G - I, ord=2) + np.linalg.norm(G - I, ord="fro"), 1)
-            # tau = min(2 * np.linalg.norm(G - I, ord="fro"), 1)
-            return np.sqrt(1 + mu_squared * tau**2)
-
-        current_lambda = lambda_(full_sample) if len(full_sample) > 0 else 0
+        current_lambda = lambda_(full_sample)
         print(f"Sample size: {len(full_sample)}  |  mu: {lambda_to_mu(current_lambda):.1f} < {target_mu:.1f}")
         print(f"Suboptimality factor: {suboptimality(full_sample):.1f}")
         if draw_for_stability:
             if lambda_to_mu(current_lambda) > target_mu:
-                candidates = ensure_stability(core_basis, lambda_, target_lambda)
+                candidates = ensure_stability(core_basis, lambda_, mu_to_lambda(target_mu))
                 candidates = np.concatenate([full_sample, candidates], axis=0)
                 selected = list(range(len(full_sample)))
                 selection_size = max(len(full_sample) + 2, 2 * core_basis.dimension)
@@ -334,10 +321,10 @@ if __name__ == "__main__":
                 full_values = np.concatenate([full_values, target(candidates[new_selected])], axis=0)
                 full_sample = candidates[selected]
                 selected_lambda = lambda_(full_sample)
-                # candidates = ensure_stability(core_basis, lambda_, target_lambda)
+                # candidates = ensure_stability(core_basis, lambda_, mu_to_lambda(target_mu))
                 # candidates = np.concatenate([full_sample, candidates], axis=0)
                 # selected = list(range(len(full_sample)))
-                # selected, selected_lambda = greedy_bound(eta, lambda_, target_lambda, candidates, selected)
+                # selected, selected_lambda = greedy_bound(eta, lambda_, mu_to_lambda(target_mu), candidates, selected)
                 # assert np.all(np.asarray(selected[:len(full_sample)]) == np.arange(len(full_sample)))
                 # new_selected = selected[len(full_sample):]
                 # full_values = np.concatenate([full_values, target(candidates[new_selected])], axis=0)
@@ -459,7 +446,6 @@ if __name__ == "__main__":
     else:
         style = "k>--"
 
-    import matplotlib.pyplot as plt
     plt.style.use('classic')
     fig, ax = plt.subplots(1, 1)
     ax.plot(np.asarray(sample_sizes) / sum(cmp.size for cmp in tt), errors, style, fillstyle="none", linewidth=1.5, markeredgewidth=1.5, markersize=6, label=f"$r = {rank}$")

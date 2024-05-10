@@ -19,6 +19,8 @@ def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
             raise ValueError(f"dimension mismatch: input dimension is 1 but space dimension is {dimension}")
         elif points.shape[1] != dimension:
             raise ValueError(f"dimension mismatch: input dimension is {points.shape[1]} but space dimension is {dimension}")
+        if len(points) < basis.dimension:
+            return 0.0
         K = kernel(points[:, None], points[None, :])
         assert K.shape == (len(points), len(points))
         bs = basis(points)
@@ -28,6 +30,10 @@ def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
         assert cs.shape == (len(points), basis.dimension)
         return min(max(np.linalg.norm(bs @ cs, ord=-2), 0), 1)
     return lambda_
+
+
+mu_to_lambda = lambda m: 1 / m**2
+lambda_to_mu = lambda l: 1 / np.sqrt(l)
 
 
 def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
@@ -52,6 +58,34 @@ def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
         # Then eta(x) = sum_j bs[j] @ cs[j] = sum_{i,j} bs[j, i] * cs[j, i].
         return min(max(np.sum(bs * cs), 0), basis.dimension)
     return eta
+
+
+def suboptimality_metric(kernel: Kernel, basis: Basis) -> Metric:
+    if kernel.domain != basis.domain:
+        raise ValueError(f"domain mismatch: kernel domain is {kernel.domain} but basis domain is {basis.domain}")
+    dimension = np.reshape(kernel.domain, (-1, 2)).shape[0]
+    def suboptimality(points: np.ndarray) -> float:
+        points = np.asarray(points)
+        assert points.ndim >= 1
+        if points.ndim == 1 and dimension != 1:
+            raise ValueError(f"dimension mismatch: input dimension is 1 but space dimension is {dimension}")
+        elif points.shape[1] != dimension:
+            raise ValueError(f"dimension mismatch: input dimension is {points.shape[1]} but space dimension is {dimension}")
+        K = kernel(points[:, None], points[None, :])
+        assert K.shape == (len(points), len(points))
+        bs = basis(points)
+        assert bs.shape == (basis.dimension, len(points))
+        # We first compute G = bs @ inv(K) @ bs.T.
+        G = np.linalg.lstsq(K, bs.T, rcond=None)[0]
+        assert G.shape == (len(points), basis.dimension)
+        G = bs @ G
+        assert G.shape == (basis.dimension, basis.dimension)
+        mu_squared = 1 / min(max(np.linalg.norm(G, ord=-2), 0), 1)
+        I = np.eye(basis.dimension)
+        tau = min(np.linalg.norm(G - I, ord=2) + np.linalg.norm(G - I, ord="fro"), 1)
+        # tau = min(2 * np.linalg.norm(G - I, ord="fro"), 1)
+        return np.sqrt(1 + mu_squared * tau**2)
+    return suboptimality
 
 
 def greedy_step(metric: Metric, full_sample: np.ndarray, selected: list[int]) -> int:
