@@ -305,10 +305,9 @@ if __name__ == "__main__":
             lambda_ = lambda_metric(product_kernel, core_basis)
             suboptimality = suboptimality_metric(product_kernel, core_basis)
 
-            current_lambda = lambda_(full_sample)
-            print(f"Sample size: {len(full_sample)}  |  mu: {lambda_to_mu(current_lambda):.1f} < {target_mu:.1f}")
-            print(f"Suboptimality factor: {suboptimality(full_sample):.1f}")
+            print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {suboptimality(full_sample):.1f} < {np.sqrt(1 + target_mu**2):.1f}")
             if draw_for_stability:
+                current_lambda = lambda_(full_sample)
                 if lambda_to_mu(current_lambda) > target_mu:
                     candidates = ensure_stability(core_basis, lambda_, mu_to_lambda(target_mu))
                     candidates = np.concatenate([full_sample, candidates], axis=0)
@@ -331,8 +330,7 @@ if __name__ == "__main__":
                 else:
                     selected_lambda = current_lambda
                 assert full_values.ndim == 1 and full_sample.shape == (len(full_values), 2)
-                print(f"Sample size: {len(full_sample)}  |  mu: {lambda_to_mu(selected_lambda):.1f} < {target_mu:.1f}")
-                print(f"Suboptimality factor: {suboptimality(full_sample):.1f}")
+                print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {suboptimality(full_sample):.1f} < {np.sqrt(1 + target_mu**2):.1f}")
 
             K = kernel_matrix(product_kernel, full_sample)
             es = np.linalg.eigvalsh(K)
@@ -348,22 +346,6 @@ if __name__ == "__main__":
                 full_values = np.delete(full_values, js, axis=0)
                 K = kernel_matrix(product_kernel, full_sample)
                 es = np.linalg.eigvalsh(K)
-
-            if use_debiasing:
-                print("Draw debiasing sample...")
-                core_basis_l2 = CoreBasis(tt, [l2_basis]*2, core_position)
-                debiasing_sample, debiasing_weights = draw_weighted_sequence(create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size)
-                debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
-                assert debiasing_weights.shape == (len(debiasing_sample),)
-                debiasing_values = target(debiasing_sample)
-
-            def gradient(points: np.ndarray, values: np.ndarray) -> np.ndarray:
-                # L(v) = 0.5 |v - u|^2  -->  grad(L(v)) = v - u
-                # v - grad(L(v)) = v - (v - u) = u ✅
-                assert values.ndim == 1 and points.shape == values.shape + (2,)
-                prediction = evaluate(tt, [rkhs_basis]*2, points)
-                assert prediction.shape == values.shape
-                return prediction - values
 
             if update_in_stable_space:
                 print("Computing stable directions...")
@@ -398,6 +380,16 @@ if __name__ == "__main__":
                 stable_basis = TransformedBasis(P, core_basis)
                 print(f"Stable space dimension: {stable_space_dimension} / {core_basis.dimension}")
 
+
+            def gradient(points: np.ndarray, values: np.ndarray) -> np.ndarray:
+                # L(v) = 0.5 |v - u|^2  -->  grad(L(v)) = v - u
+                # v - grad(L(v)) = v - (v - u) = u ✅
+                assert values.ndim == 1 and points.shape == values.shape + (2,)
+                prediction = evaluate(tt, [rkhs_basis]*2, points)
+                assert prediction.shape == values.shape
+                return prediction - values
+
+
             full_grad = gradient(full_sample, full_values)
             assert np.all(np.isfinite(full_grad))
             if update_in_stable_space:
@@ -412,6 +404,12 @@ if __name__ == "__main__":
             assert np.all(np.isfinite(update_core))
 
             if use_debiasing:
+                print("Draw debiasing sample...")
+                core_basis_l2 = CoreBasis(tt, [l2_basis]*2, core_position)
+                debiasing_sample, debiasing_weights = draw_weighted_sequence(create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size)
+                debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
+                assert debiasing_weights.shape == (len(debiasing_sample),)
+                debiasing_values = target(debiasing_sample)
                 debiasing_grad = gradient(debiasing_sample, debiasing_values)
                 assert np.all(np.isfinite(debiasing_grad))
                 residual = debiasing_grad - core_basis(debiasing_sample).T @ update_core
