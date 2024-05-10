@@ -24,10 +24,10 @@ def bayes_kernel_variance(kernel: Kernel, points: np.ndarray, conditioned_on: np
     return res
 
 
-def compute_embedding_marginal(kernel: Kernel, basis: Basis):
+def compute_embedding_marginal(kernel: Kernel, basis: Basis, regularisation: float = 1e-8):
     subspace_kernel = create_subspace_kernel(basis)
     def density(points: np.ndarray) -> np.ndarray:
-        return subspace_kernel(points, points) / kernel(points, points)
+        return subspace_kernel(points, points) / (kernel(points, points) + regularisation)
     return density
 
 
@@ -300,19 +300,23 @@ if __name__ == "__main__":
         volume_sampler = partial(draw_volume_sample, rng=rng, rkhs_kernel=rkhs_kernel, reference_density=rho, discretisation=discretisation)
         subspace_volume_sampler = partial(draw_subspace_volume_sample, rng=rng, subspace_basis=l2_basis, reference_density=rho, discretisation=discretisation)
 
-        # def marginal_embedding_sampler(conditioned_on: Optional[list[float]] = None) -> float:
-        #     TODO: weighting...
-        #     return draw_sample(rng=rng, density=compute_embedding_marginal(rkhs_kernel, rkhs_basis), discretisation=discretisation)
+        def marginal_embedding_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+            density = compute_embedding_marginal(rkhs_kernel, rkhs_basis)
+            assert space in ["h10", "h1", "h1gauss"]  # We can weight with the Lebesgue measure for for all three spaces.
+            weighted_density = density
+            # weighted_density = lambda x: density(x) * rho(x)
+            return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
 
         def marginal_subspace_volume_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+            # density = compute_subspace_volume_marginal(rkhs_basis)
             density = compute_subspace_volume_marginal(l2_basis)
             weighted_density = lambda x: density(x) * rho(x)
             return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
 
-        # samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_embedding_sampler, marginal_subspace_volume_sampler]
-        # sampler_names = ["Embedding sampler", "Volume sampler", "Subspace volume sampler", "Marginal embedding sampler", "Marginal subspace volume sampler"]
-        samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_subspace_volume_sampler]
-        sampler_names = ["Embedding sampling", "Volume sampling", "Subspace volume sampling", "Christoffel sampling"]
+        samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_subspace_volume_sampler, marginal_embedding_sampler]
+        sampler_names = ["Embedding sampling", "Volume sampling", "Subspace volume sampling", "Christoffel sampling", "Marginal embedding sampler"]
+        # samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_subspace_volume_sampler]
+        # sampler_names = ["Embedding sampling", "Volume sampling", "Subspace volume sampling", "Christoffel sampling"]
         constants = np.empty((len(samplers), trials, 3))
         for index in range(len(samplers)):
             print(f"Sampling scheme: {sampler_names[index]}")
