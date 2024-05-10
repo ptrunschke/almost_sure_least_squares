@@ -165,8 +165,7 @@ if __name__ == "__main__":
 
     target_mu = 50
     debiasing_sample_size = 1
-    max_iteration = 500
-    max_iteration = 200
+    max_iteration = 1000
 
 
     all_parameters = {"draw_for_stability", "update_in_stable_space", "use_stable_projection", "use_debiasing"}
@@ -202,7 +201,6 @@ if __name__ == "__main__":
 
 
     ranks = [2, 4, 6]
-    ranks = [2, 4]
 
     # def target(points: np.ndarray) -> np.ndarray:
     #     # Corner peak in two dimensions
@@ -419,6 +417,9 @@ if __name__ == "__main__":
                 residual = debiasing_grad - core_basis_rkhs(debiasing_sample).T @ update_core
                 assert np.all(np.isfinite(residual))
                 debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_rkhs)
+                # TODO: ideally, i would like to compute
+                #     quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_l2)
+                #     and then perform a change of basis to core_basis_rkhs
                 assert np.all(np.isfinite(debiasing_core))
                 update_core += debiasing_core
 
@@ -434,7 +435,9 @@ if __name__ == "__main__":
                 full_values = np.concatenate([full_values, debiasing_values], axis=0)
             print()
 
-        # TODO: instead of a fixed number of iterations, stop if the error does not change for 10 iterations or so...
+            # TODO: instead of a fixed number of iterations, stop if the error does not change for 10 iterations or so...
+            if np.mean(abs(np.diff(np.log(errors[-50:])) / np.diff(sample_sizes[-50:]))) <= 0.01:
+                break
 
         test_error = compute_test_error(tt)
         errors.append(test_error)
@@ -457,13 +460,17 @@ if __name__ == "__main__":
     ax.set_ylabel("error")
     ax.legend()
 
+    plot_directory = Path(__file__).parent / "plot"
+    plot_directory.mkdir(exist_ok=True)
+    plot_path = plot_directory / ("als_" + "_".join(sorted(used_parameters)) + ".png")
+    print("Saving sample statistics plot to", plot_path)
+    plt.savefig(
+        plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
+    )
+    plot_path = plot_directory / ("als_" + "_".join(sorted(used_parameters)) + ".jpg")
+    print("Saving sample statistics plot to", plot_path)
+    plt.savefig(
+        plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
+    )
     plt.show()
-
-    # plot_directory = Path(__file__).parent / "plot"
-    # plot_directory.mkdir(exist_ok=True)
-    # plot_path = plot_directory / ("als_" + "_".join(sorted(used_parameters)) + ".png")
-    # print("Saving sample statistics plot to", plot_path)
-    # plt.savefig(
-    #     plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
-    # )
-    # plt.close(fig)
+    plt.close(fig)
