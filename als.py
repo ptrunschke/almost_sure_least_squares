@@ -198,7 +198,7 @@ if __name__ == "__main__":
 
 
     ranks = [2, 4, 6]
-    ranks = [2]
+    ranks = [2, 4]
 
     # def target(points: np.ndarray) -> np.ndarray:
     #     # Corner peak in two dimensions
@@ -300,19 +300,19 @@ if __name__ == "__main__":
             sample_sizes.append(len(full_sample))
             print(f"Relative test set error: {test_error:.2e}")
 
-            core_basis = CoreBasis(tt, [rkhs_basis]*2, core_position)
-            eta = eta_metric(product_kernel, core_basis)
-            lambda_ = lambda_metric(product_kernel, core_basis)
-            suboptimality = suboptimality_metric(product_kernel, core_basis)
+            core_basis_rkhs = CoreBasis(tt, [rkhs_basis]*2, core_position)
+            eta = eta_metric(product_kernel, core_basis_rkhs)
+            lambda_ = lambda_metric(product_kernel, core_basis_rkhs)
+            suboptimality = suboptimality_metric(product_kernel, core_basis_rkhs)
 
             print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {suboptimality(full_sample):.1f} < {np.sqrt(1 + target_mu**2):.1f}")
             if draw_for_stability:
                 current_lambda = lambda_(full_sample)
                 if lambda_to_mu(current_lambda) > target_mu:
-                    candidates = ensure_stability(core_basis, lambda_, mu_to_lambda(target_mu))
+                    candidates = ensure_stability(core_basis_rkhs, lambda_, mu_to_lambda(target_mu))
                     candidates = np.concatenate([full_sample, candidates], axis=0)
                     selected = list(range(len(full_sample)))
-                    selection_size = max(len(full_sample) + 2, 2 * core_basis.dimension)
+                    selection_size = max(len(full_sample) + 2, 2 * core_basis_rkhs.dimension)
                     selected = greedy_draw(eta, selection_size, candidates, selected)
                     assert np.all(np.asarray(selected[:len(full_sample)]) == np.arange(len(full_sample)))
                     new_selected = selected[len(full_sample):]
@@ -353,11 +353,11 @@ if __name__ == "__main__":
                 print(f"Stability threshold: {stability_threshold:.1f}")
                 K = product_kernel(full_sample[:, None], full_sample[None, :])
                 assert K.shape == (len(full_sample), len(full_sample))
-                M = core_basis(full_sample)
-                assert M.shape == (core_basis.dimension, len(full_sample))
+                M = core_basis_rkhs(full_sample)
+                assert M.shape == (core_basis_rkhs.dimension, len(full_sample))
                 # We want to compute M @ inv(K) @ M.T
                 G = np.linalg.lstsq(K, M.T, rcond=None)[0]
-                assert G.shape == (len(full_sample), core_basis.dimension)
+                assert G.shape == (len(full_sample), core_basis_rkhs.dimension)
                 G = M @ G
                 es, vs = np.linalg.eigh(G)
                 assert np.allclose(vs * es @ vs.T, G)
@@ -377,8 +377,8 @@ if __name__ == "__main__":
                 # P = vs[:, mask] @ vs[:, mask].T
                 stable_space_dimension = np.count_nonzero(mask)
                 P = vs[:, mask].T
-                stable_basis = TransformedBasis(P, core_basis)
-                print(f"Stable space dimension: {stable_space_dimension} / {core_basis.dimension}")
+                stable_basis = TransformedBasis(P, core_basis_rkhs)
+                print(f"Stable space dimension: {stable_space_dimension} / {core_basis_rkhs.dimension}")
 
 
             def gradient(points: np.ndarray, values: np.ndarray) -> np.ndarray:
@@ -396,11 +396,11 @@ if __name__ == "__main__":
                 update_core = P.T @ optimal_least_squares(full_sample, full_grad, product_kernel, stable_basis)
             elif use_stable_projection:
                 if suboptimality(full_sample) <= target_mu:
-                    update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis)
+                    update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis_rkhs)
                 else:
                     update_core = np.full(tt[core_position].size, fill_value=0.0, dtype=float)
             else:
-                update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis)
+                update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis_rkhs)
             assert np.all(np.isfinite(update_core))
 
             if use_debiasing:
@@ -412,9 +412,9 @@ if __name__ == "__main__":
                 debiasing_values = target(debiasing_sample)
                 debiasing_grad = gradient(debiasing_sample, debiasing_values)
                 assert np.all(np.isfinite(debiasing_grad))
-                residual = debiasing_grad - core_basis(debiasing_sample).T @ update_core
+                residual = debiasing_grad - core_basis_rkhs(debiasing_sample).T @ update_core
                 assert np.all(np.isfinite(residual))
-                debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis)
+                debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_rkhs)
                 assert np.all(np.isfinite(debiasing_core))
                 update_core += debiasing_core
 
