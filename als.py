@@ -21,7 +21,7 @@ def greedy_bound(selection_metric: Metric, target_metric: Metric, target: float,
     return selected, value
 
 
-def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float) -> np.ndarray:
+def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float, repetitions: int = 10) -> np.ndarray:
     # Draw new samples until the target is over-satisfied by a factor of 1/(1-1/e) = e / (e - 1).
     print("Ensuring stability...")
     core_space_sampler = create_core_space_sampler(rng, core_basis, discretisation)
@@ -29,8 +29,13 @@ def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float
     target = np.e / (np.e - 1) * target
     value = -np.inf
     while value < target:
-        candidates.extend(draw_weighted_sequence(core_space_sampler, core_basis.dimension)[0])
-        value = target_metric(candidates)
+        for _ in range(repetitions):
+            extension = draw_weighted_sequence(core_space_sampler, core_basis.dimension)[0]
+            extended_value = target_metric(candidates + extension)
+            if extended_value > value:
+                extended_candidates = candidates + extension
+                value = extended_value
+        candidates = extended_candidates
         print(f"  Sample size: {len(candidates)}  |  Target metric: {value:.2e} < {target:.2e}")
     candidates = np.asarray(candidates)
     assert candidates.ndim == 2 and candidates.shape[1] == 2
