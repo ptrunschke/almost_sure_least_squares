@@ -168,33 +168,37 @@ if __name__ == "__main__":
     max_iteration = 500
     max_iteration = 200
 
+
+    all_parameters = {"draw_for_stability", "update_in_stable_space", "use_stable_projection", "use_debiasing"}
+
     # Original algorithm
-    draw_for_stability = True
-    update_in_stable_space = False
-    use_stable_projection = False
-    use_debiasing = True
+    used_parameters = {"draw_for_stability", "use_debiasing"}
 
     # # Try to use fewer samples by updating only in the subspace where G(x) is stable.
     # #     Note that this is a generalisation of the conditionally stable projector from Cohen and Migliorati.
     # #     They use the empirical projector only if it is stable. We use the stable subspace, which may be zero-dimensional.
     # #     One problem is, that we don't have any guarantees about |(I-P) grad| <= |P grad|.
     # #     This means that even though the update is stable, it may be detrimental.
-    # draw_for_stability = False
-    # update_in_stable_space = True
-    # use_stable_projection = False
-    # use_debiasing = True
+    # used_parameters = {"update_in_stable_space", "use_debiasing"}
 
     # # Try to use fewer samples by updating only when the entire G(x) is stable.
-    # draw_for_stability = False
-    # update_in_stable_space = False
-    # use_stable_projection = True
-    # use_debiasing = True
+    # used_parameters = {"use_stable_projection", "use_debiasing"}
 
-    # # Reference algorithm (only use the RKHS projection)
-    # draw_for_stability = True
-    # update_in_stable_space = False
-    # use_stable_projection = False
-    # use_debiasing = False
+    # Reference algorithm (only use the RKHS projection)
+    # used_parameters = {"draw_for_stability",}
+
+    assert used_parameters <= all_parameters
+    for parameter in used_parameters:
+        globals()[parameter] = True
+    for parameter in all_parameters - used_parameters:
+        globals()[parameter] = False
+
+    print("Algorithm parameters:")
+    max_parameter_len = max(len(p) for p in all_parameters)
+    for parameter in sorted(all_parameters):
+        print(f"    {parameter:<{max_parameter_len}s} = {globals()[parameter]}")
+
+    assert draw_for_stability or use_debiasing
 
 
     ranks = [2, 4, 6]
@@ -457,7 +461,7 @@ if __name__ == "__main__":
 
     # plot_directory = Path(__file__).parent / "plot"
     # plot_directory.mkdir(exist_ok=True)
-    # plot_path = plot_directory / "als.png"
+    # plot_path = plot_directory / ("als_" + "_".join(sorted(used_parameters)) + ".png")
     # print("Saving sample statistics plot to", plot_path)
     # plt.savefig(
     #     plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
