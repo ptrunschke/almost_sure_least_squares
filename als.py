@@ -3,7 +3,7 @@ from typing import Optional
 import numpy as np
 from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel, Kernel, kernel_matrix
 from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis, TransformedBasis, Basis
-from sampling import draw_sample, draw_sequence, Sampler
+from sampling import draw_sample, draw_weighted_sequence, Sampler
 from greedy_subsampling import eta_metric, lambda_metric, greedy_step, Metric
 from least_squares import optimal_least_squares
 
@@ -18,9 +18,11 @@ space = ["h10", "h1", "h1gauss"][1]
 target_mu = 50
 debiasing_sample_size = 1
 max_iteration = 500
-rank = 4
+max_iteration = 200
 
-rank = 6  # just to test the 1 / (1 + sum) test function --- Anthony's experiment
+rank = 2
+# rank = 4
+# rank = 6  # just to test the 1 / (1 + sum) test function --- Anthony's experiment
 
 # def target(points: np.ndarray) -> np.ndarray:
 #     # Corner peak in two dimensions
@@ -59,30 +61,31 @@ def create_core_space_sampler(rng: np.random.Generator, core_basis: CoreBasis, d
 
     uni_basis = core_basis.bases[core_basis.core_position]
     uni_density = lambda idx: lambda x: uni_basis(x)[idx]**2 * rho(x)
+    uni_christoffel = lambda x: np.sum(uni_basis(x)**2, axis=0)
 
     red_transform = core_basis.tt[1] if core_basis.core_position == 0 else core_basis.tt[0].T
     red_basis = TransformedBasis(red_transform, core_basis.bases[1 - core_basis.core_position])
     red_density = lambda idx: lambda x: red_basis(x)[idx]**2 * rho(x)
+    red_christoffel = lambda x: np.sum(red_basis(x)**2, axis=0)
 
-    print("TODO: The quasi-projection is erronous. It is missing the weights.")
-    def core_space_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+    def core_space_sampler(conditioned_on: Optional[tuple[list[float], list[float]]] = None) -> float:
         uni_idx = rng.integers(0, core_basis.bases[core_basis.core_position].dimension)
         uni_sample = draw_sample(rng=rng, density=uni_density(uni_idx), discretisation=discretisation)
         red_idx = rng.integers(0, rank)
         red_sample = draw_sample(rng=rng, density=red_density(red_idx), discretisation=discretisation)
 
-        # weights = core_basis.dimension * rho(uni_sample) * rho(red_sample) / (uni_density(uni_idx)(uni_sample) * red_density(red_idx)(red_sample))
+        weight = core_basis.dimension / uni_christoffel(uni_sample) / red_christoffel(red_sample)
 
         if core_basis.core_position == 0:
-            return np.array([uni_sample, red_sample])
+            return np.array([uni_sample, red_sample]), weight
         else:
-            return np.array([red_sample, uni_sample])
+            return np.array([red_sample, uni_sample]), weight
     return core_space_sampler
 
 
 if space == "h10":
     def rho(x):
-        return np.full(len(x), 0.5)
+        return np.full_like(x, fill_value=0.5, dtype=float)
     rkhs_kernel = H10Kernel((-1, 1))
     if basis_name == "polynomial":
         initial_basis = MonomialBasis(dimension, domain=(-1, 1))
@@ -93,7 +96,7 @@ if space == "h10":
     initial_basis = enforce_zero_trace(initial_basis)
 elif space == "h1":
     def rho(x):
-        return np.full(len(x), 0.5)
+        return np.full_like(x, fill_value=0.5, dtype=float)
     rkhs_kernel = H1Kernel((-1, 1))
     if basis_name == "polynomial":
         initial_basis = MonomialBasis(dimension, domain=(-1, 1))
@@ -117,6 +120,12 @@ else:
 
 discretisation = np.linspace(*initial_basis.domain, 1000)
 
+if space == "h1gauss":
+    discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)
+else:
+    discrete_l2_gramian = compute_discrete_gramian("l2", initial_basis.domain, 2 ** 13)
+l2_basis = orthonormalise(initial_basis, *discrete_l2_gramian)
+
 discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2 ** 13)
 rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
 
@@ -125,15 +134,15 @@ lambda_to_mu = lambda l: 1 / np.sqrt(l)
 
 
 
-def quasi_projection(points: np.ndarray, values: np.ndarray, basis: Basis):
-    assert points.ndim >= 1 and values.ndim == 1
-    assert len(points) == len(values)
+def quasi_projection(points: np.ndarray, values: np.ndarray, weights: np.ndarray, basis: Basis):
+    assert points.ndim >= 1 and values.ndim == 1 and weights.ndim == 1
+    assert len(points) == len(values) == len(weights)
     dimension = np.reshape(basis.domain, (-1, 2)).shape[0]
     if points.ndim == 1 and dimension != 1:
         raise ValueError(f"dimension mismatch: input dimension is 1 but space dimension is {dimension}")
     elif points.shape[1] != dimension:
         raise ValueError(f"dimension mismatch: input dimension is {points.shape[1]} but space dimension is {dimension}")
-    return basis(points) @ values / len(points)
+    return basis(points) @ (values * weights) / len(points)
 
 
 TensorTrain = list[np.ndarray]
@@ -221,7 +230,7 @@ def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float
     target = np.e / (np.e - 1) * target
     value = -np.inf
     while value < target:
-        candidates.extend(draw_sequence(core_space_sampler, core_basis.dimension))
+        candidates.extend(draw_weighted_sequence(core_space_sampler, core_basis.dimension)[0])
         value = target_metric(candidates)
         print(f"  Sample size: {len(candidates)}  |  Target metric: {value:.2e} < {target:.2e}")
     candidates = np.asarray(candidates)
@@ -238,6 +247,36 @@ def greedy_draw(selection_metric: Metric, selection_size: int, full_sample: np.n
     while len(selected) < selection_size:
         selected.append(greedy_step(selection_metric, full_sample, selected))
     return selected
+
+
+# Original algorithm
+draw_for_stability = True
+update_in_stable_space = False
+use_stable_projection = False
+use_debiasing = True
+
+# # Try to use fewer samples by updating only in the subspace where G(x) is stable.
+# #     Note that this is a generalisation of the conditionally stable projector from Cohen and Migliorati.
+# #     They use the empirical projector only if it is stable. We use the stable subspace, which may be zero-dimensional.
+# #     One problem is, that we don't have any guarantees about |(I-P) grad| <= |P grad|.
+# #     This means that even though the update is stable, it may be detrimental.
+# draw_for_stability = False
+# update_in_stable_space = True
+# use_stable_projection = False
+# use_debiasing = True
+
+# # Try to use fewer samples by updating only when the entire G(x) is stable.
+# draw_for_stability = False
+# update_in_stable_space = False
+# use_stable_projection = True
+# use_debiasing = True
+
+
+# Reference algorithm (only use the RKHS projection)
+draw_for_stability = True
+update_in_stable_space = False
+use_stable_projection = False
+use_debiasing = False
 
 
 if space in ["h1", "h10"]:
@@ -297,9 +336,8 @@ for it in range(max_iteration):
         return np.sqrt(1 + mu_squared * tau**2)
 
     current_lambda = lambda_(full_sample) if len(full_sample) > 0 else 0
-    print(f"Initial sample size: {len(full_sample)}  |  Initial mu: {lambda_to_mu(current_lambda):.1f} < {target_mu:.1f}")
-    print(f"Initial suboptimality factor: {suboptimality(full_sample):.1f}")
-    draw_for_stability = True
+    print(f"Sample size: {len(full_sample)}  |  mu: {lambda_to_mu(current_lambda):.1f} < {target_mu:.1f}")
+    print(f"Suboptimality factor: {suboptimality(full_sample):.1f}")
     if draw_for_stability:
         if lambda_to_mu(current_lambda) > target_mu:
             candidates = ensure_stability(core_basis, lambda_, target_lambda)
@@ -325,8 +363,6 @@ for it in range(max_iteration):
         assert full_values.ndim == 1 and full_sample.shape == (len(full_values), 2)
         print(f"Sample size: {len(full_sample)}  |  mu: {lambda_to_mu(selected_lambda):.1f} < {target_mu:.1f}")
         print(f"Suboptimality factor: {suboptimality(full_sample):.1f}")
-    else:
-        print("Skipping stability check...")
 
     K = kernel_matrix(product_kernel, full_sample)
     es = np.linalg.eigvalsh(K)
@@ -343,12 +379,13 @@ for it in range(max_iteration):
         K = kernel_matrix(product_kernel, full_sample)
         es = np.linalg.eigvalsh(K)
 
-    print("Draw debiasing sample...")
-    print("TODO: This sample should be drawn according to an L2 basis!")
-    print("TODO: Note that the 'draw_for_stability' may be misleadingly bad, just because it relies heavier on the quasi-projection which suffers from at least two errors!")
-    debiasing_sample = draw_sequence(create_core_space_sampler(rng, core_basis, discretisation), debiasing_sample_size)
-    debiasing_sample = np.asarray(debiasing_sample)
-    debiasing_values = target(debiasing_sample)
+    if use_debiasing:
+        print("Draw debiasing sample...")
+        core_basis_l2 = CoreBasis(tt, [l2_basis]*2, core_position)
+        debiasing_sample, debiasing_weights = draw_weighted_sequence(create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size)
+        debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
+        assert debiasing_weights.shape == (len(debiasing_sample),)
+        debiasing_values = target(debiasing_sample)
 
     def gradient(points: np.ndarray, values: np.ndarray) -> np.ndarray:
         # L(v) = 0.5 |v - u|^2  -->  grad(L(v)) = v - u
@@ -358,13 +395,7 @@ for it in range(max_iteration):
         assert prediction.shape == values.shape
         return prediction - values
 
-    update_in_stable_space = False
-    use_stable_projection = True
     if update_in_stable_space:
-        print("Note that this is a generalisation of the conditionally stable projector from Cohen and Migliorati.")
-        print("They use the empirical projector only if it is stable. We use the stable subspace, which may be zero-dimensional.")
-        print("One problem is, that we don't have any guarantees about |(I-P) grad| <= |P grad|.")
-        print("This means that even though the update is stable, it may be detrimental.")
         print("Computing stable directions...")
         stability_threshold = 10
         print(f"Stability threshold: {stability_threshold:.1f}")
@@ -402,22 +433,23 @@ for it in range(max_iteration):
     if update_in_stable_space:
         update_core = P.T @ optimal_least_squares(full_sample, full_grad, product_kernel, stable_basis)
     elif use_stable_projection:
-        update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis)
-        if suboptimality(full_sample) > target_mu:
-            update_core *= 0
+        if suboptimality(full_sample) <= target_mu:
+            update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis)
+        else:
+            update_core = np.full(tt[core_position].size, fill_value=0.0, dtype=float)
     else:
         update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis)
     assert np.all(np.isfinite(update_core))
-    if (not draw_for_stability) or lambda_to_mu(selected_lambda) >= 5:
+
+    if use_debiasing:
         debiasing_grad = gradient(debiasing_sample, debiasing_values)
         assert np.all(np.isfinite(debiasing_grad))
         residual = debiasing_grad - core_basis(debiasing_sample).T @ update_core
         assert np.all(np.isfinite(residual))
-        debiasing_core = quasi_projection(debiasing_sample, residual, core_basis)
+        debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis)
         assert np.all(np.isfinite(debiasing_core))
         update_core += debiasing_core
-    elif update_in_stable_space:
-        assert stable_space_dimension > 0
+
     assert len(tt) == 2
     if core_position == 0:
         update_core = update_core.reshape(dimension, rank)
@@ -425,16 +457,32 @@ for it in range(max_iteration):
         update_core = update_core.reshape(dimension, rank).T
     tt[core_position] -= step_size * update_core
 
-    if (not draw_for_stability) or lambda_to_mu(selected_lambda) >= 5:
+    if use_debiasing:
         full_sample = np.concatenate([full_sample, debiasing_sample], axis=0)
         full_values = np.concatenate([full_values, debiasing_values], axis=0)
+    print()
 
-try:
-    import matplotlib.pyplot as plt
-    plt.plot(np.asarray(sample_sizes) / sum(cmp.size for cmp in tt), errors)
-    plt.yscale("log")
-    plt.xlabel("sample size / number of parameters")
-    plt.show()
-finally:
-    from IPython import embed
-    # embed()
+
+# TODO: instead of a fixed number of iterations, stop if the error does not change for 10 iterations or so...
+
+
+if rank == 2:
+    style = "b>--"
+elif rank == 4:
+    style = "r>--"
+elif rank == 6:
+    style = "g>--"
+else:
+    style = "k>--"
+
+import matplotlib.pyplot as plt
+plt.style.use('classic')
+fig, ax = plt.subplots(1, 1)
+ax.plot(np.asarray(sample_sizes) / sum(cmp.size for cmp in tt), errors, style, fillstyle="none", linewidth=1.5, markeredgewidth=1.5, markersize=6, label=f"$r = {rank}$")
+ax.set_yscale("log")
+# plt.xlabel("sample size / number of parameters")
+ax.set_xlabel("nb. evaluations / nb. parameters")
+ax.set_ylabel("error")
+# ax.axis[:].major_ticks.set_tick_out(False)
+ax.legend()
+plt.show()

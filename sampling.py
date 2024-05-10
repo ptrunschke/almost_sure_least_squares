@@ -183,7 +183,7 @@ def draw_subspace_volume_sample(
 Sampler = Callable[[list[float]], float]
 
 
-def draw_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optional[list[float]] = None, verbose: bool = False) -> np.ndarray:
+def draw_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optional[list[float]] = None, verbose: bool = False) -> list[float]:
     if initial_sample is None:
         sample = []
     else:
@@ -192,6 +192,23 @@ def draw_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optiona
     for _ in _range(sample_size):
         sample.append(sampler(conditioned_on=sample))
     return sample
+
+
+def draw_weighted_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optional[list[float]] = None, initial_weights: Optional[list[float]] = None, verbose: bool = False) -> tuple[list[float], list[float]]:
+    if initial_sample is None:
+        sample = []
+    else:
+        sample = list(initial_sample)
+    if initial_weights is None:
+        weights = []
+    else:
+        weights = list(initial_weights)
+    _range = trange if verbose else range
+    for _ in _range(sample_size):
+        s, w = sampler(conditioned_on=(sample, weights))
+        sample.append(s)
+        weights.append(w)
+    return sample, weights
 
 
 def kernel_gramian(kernel: Kernel, basis: Basis, points: np.ndarray, *, regularisation: float = 1e-8) -> np.ndarray:
