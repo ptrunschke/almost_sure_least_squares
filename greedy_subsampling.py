@@ -9,12 +9,20 @@ Metric = Callable[[np.ndarray], float]
 
 
 def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
+    if kernel.domain != basis.domain:
+        raise ValueError(f"domain mismatch: kernel domain is {kernel.domain} but basis domain is {basis.domain}")
+    dimension = np.reshape(kernel.domain, (-1, 2)).shape[0]
     def lambda_(points: np.ndarray) -> float:
         points = np.asarray(points)
-        assert points.ndim == 1
+        assert points.ndim >= 1
+        if points.ndim == 1 and dimension != 1:
+            raise ValueError(f"dimension mismatch: input dimension is 1 but space dimension is {dimension}")
+        elif points.shape[1] != dimension:
+            raise ValueError(f"dimension mismatch: input dimension is {points.shape[1]} but space dimension is {dimension}")
         K = kernel(points[:, None], points[None, :])
+        assert K.shape == (len(points), len(points))
         bs = basis(points)
-        assert K.shape == (len(points), len(points)) and bs.shape == (basis.dimension, len(points))
+        assert bs.shape == (basis.dimension, len(points))
         # We want to compute lambda(x) = lambda_min(bs @ inv(K) @ bs.T).
         cs = np.linalg.lstsq(K, bs.T, rcond=None)[0]
         assert cs.shape == (len(points), basis.dimension)
@@ -23,11 +31,20 @@ def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
 
 
 def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
+    if kernel.domain != basis.domain:
+        raise ValueError(f"domain mismatch: kernel domain is {kernel.domain} but basis domain is {basis.domain}")
+    dimension = np.reshape(kernel.domain, (-1, 2)).shape[0]
     def eta(points: np.ndarray) -> float:
-        assert points.ndim == 1
+        points = np.asarray(points)
+        assert points.ndim >= 1
+        if points.ndim == 1 and dimension != 1:
+            raise ValueError(f"dimension mismatch: input dimension is 1 but space dimension is {dimension}")
+        elif points.shape[1] != dimension:
+            raise ValueError(f"dimension mismatch: input dimension is {points.shape[1]} but space dimension is {dimension}")
         K = kernel(points[:, None], points[None, :])
+        assert K.shape == (len(points), len(points))
         bs = basis(points)
-        assert K.shape == (len(points), len(points)) and bs.shape == (basis.dimension, len(points))
+        assert bs.shape == (basis.dimension, len(points))
         # We want to compute eta(x) = sum_j |P_{\mcal{V}_x} b[j]|_V^2 = sum_j |b[j]|_x^2 = sum_j bs[j] @ inv(K) @ bs[j].
         # For this, we need to compute cs[j] := K(x)^{-1} b[j](x) = inv(K) @ bs[j] = (inv(K) @ bs.T).T[j].
         cs = np.linalg.lstsq(K, bs.T, rcond=None)[0].T
@@ -38,7 +55,6 @@ def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
 
 
 def greedy_step(metric: Metric, full_sample: np.ndarray, selected: list[int]) -> int:
-    assert np.ndim(full_sample) == 1
     assert len(selected) == 0 or (0 <= min(selected) and max(selected) < len(full_sample))
     candidates = np.full(len(full_sample), False)
     candidates[selected] = True
