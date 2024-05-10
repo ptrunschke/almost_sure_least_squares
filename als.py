@@ -184,7 +184,7 @@ if __name__ == "__main__":
     # used_parameters = {"use_stable_projection", "use_debiasing"}
 
     # Reference algorithm (only use the RKHS projection)
-    # used_parameters = {"draw_for_stability",}
+    used_parameters = {"draw_for_stability",}
 
     assert used_parameters <= all_parameters
     for parameter in used_parameters:
@@ -436,7 +436,8 @@ if __name__ == "__main__":
             print()
 
             # TODO: instead of a fixed number of iterations, stop if the error does not change for 10 iterations or so...
-            if np.mean(abs(np.diff(np.log(errors[-50:])) / np.diff(sample_sizes[-50:]))) <= 0.01:
+            mean_derivative = np.mean(np.nan_to_num(abs(np.diff(np.log(errors[-50:])) / np.diff(sample_sizes[-50:]))))
+            if mean_derivative <= 0.01:
                 break
 
         test_error = compute_test_error(tt)
@@ -445,14 +446,15 @@ if __name__ == "__main__":
         print(f"Relative test set error: {test_error:.2e}")
 
         if rank == 2:
-            style = "b>--"
+            color = "b"
         elif rank == 4:
-            style = "r>--"
+            color = "r"
         elif rank == 6:
-            style = "g>--"
+            # color = "g"
+            color = (0, 1, 0)
         else:
-            style = "k>--"
-        ax.plot(np.asarray(sample_sizes) / sum(cmp.size for cmp in tt), errors, style, fillstyle="none", linewidth=1.5, markeredgewidth=1.5, markersize=6, label=f"$r = {rank}$")
+            color = "k"
+        ax.plot(np.asarray(sample_sizes) / sum(cmp.size for cmp in tt), errors, ">--", color=color, fillstyle="none", linewidth=1.5, markeredgewidth=1.5, markersize=6, label=f"$r = {rank}$")
         print()
 
     ax.set_yscale("log")
@@ -463,11 +465,6 @@ if __name__ == "__main__":
     plot_directory = Path(__file__).parent / "plot"
     plot_directory.mkdir(exist_ok=True)
     plot_path = plot_directory / ("als_" + "_".join(sorted(used_parameters)) + ".png")
-    print("Saving sample statistics plot to", plot_path)
-    plt.savefig(
-        plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
-    )
-    plot_path = plot_directory / ("als_" + "_".join(sorted(used_parameters)) + ".jpg")
     print("Saving sample statistics plot to", plot_path)
     plt.savefig(
         plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
