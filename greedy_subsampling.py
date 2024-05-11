@@ -6,6 +6,7 @@ from rkhs_1d import Kernel
 
 
 Metric = Callable[[np.ndarray], float]
+FastMetric = Callable[[np.ndarray], float]
 
 
 def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
@@ -60,6 +61,40 @@ def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
     return eta
 
 
+def fast_eta_metric(kernel: Kernel, basis: Basis, fixed_points: np.ndarray) -> Metric:
+    if kernel.domain != basis.domain:
+        raise ValueError(f"domain mismatch: kernel domain is {kernel.domain} but basis domain is {basis.domain}")
+    dimension = np.reshape(kernel.domain, (-1, 2)).shape[0]
+    B = basis(fixed_points)
+    K = kernel(fixed_points[:, None], fixed_points[None, :])
+    es, vs = np.linalg.eigh(K)
+    assert np.allclose(vs * es @ vs.T, K)
+    Z = vs / np.sqrt(np.maximum(es, 0))
+    BZ = B @ Z
+    BZ_fro = np.sum(BZ**2)
+    assert BZ.shape == (basis.dimension, len(fixed_points))
+    def fast_eta(new_point: np.ndarray) -> float:
+        if dimension > 1:
+            new_point = np.reshape(new_point, (1, dimension))
+        k = kernel(fixed_points, new_point)
+        assert k.shape == (len(fixed_points),)
+        c = kernel(new_point, new_point)
+        b = basis(new_point)
+        assert b.shape == (basis.dimension, 1)
+        b = b[:, 0]
+        kZ = k @ Z
+        assert kZ.shape == (len(fixed_points),)
+        g = c - np.sum(kZ**2)
+        # return tr(BZ @ BZ.T) + (tr((BZ @ kZ.T) @ (kZ @ BZ.T) - 2 * tr((BZ @ kZ.T) @ b.T) + tr(b @ b.T)) * g
+        # result  = np.sum((BZ @ kZ)**2)
+        # result -= 2 * b @ BZ @ kZ
+        # result += np.sum(b**2)
+        # result *= g
+        # result += np.sum(BZ**2)
+        return BZ_fro + np.sum((BZ @ kZ - b)**2) * g
+    return fast_eta
+
+
 def suboptimality_metric(kernel: Kernel, basis: Basis) -> Metric:
     if kernel.domain != basis.domain:
         raise ValueError(f"domain mismatch: kernel domain is {kernel.domain} but basis domain is {basis.domain}")
@@ -102,6 +137,18 @@ def greedy_step(metric: Metric, full_sample: np.ndarray, selected: list[int]) ->
             candidates[index] = False
     opt = np.argmax(etas)
     return opt
+
+
+def fast_greedy_step(metric: FastMetric, sample: np.ndarray) -> int:
+    optimal_value = -np.inf
+    optimal_index = None
+    for index, element in enumerate(sample):
+        value = metric(element)
+        if value > optimal_value:
+            optimal_index = index
+            optimal_value = value
+    assert optimal_index is not None
+    return optimal_index
 
 
 if __name__ == "__main__":

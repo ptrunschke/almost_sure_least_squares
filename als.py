@@ -3,22 +3,7 @@ from typing import Optional
 import numpy as np
 from basis_1d import TransformedBasis, Basis
 from sampling import draw_sample, draw_weighted_sequence, Sampler
-from greedy_subsampling import greedy_step, Metric
-
-
-def greedy_bound(selection_metric: Metric, target_metric: Metric, target: float, full_sample: np.ndarray, selected: Optional[list[int]] = None) -> tuple[list[int], float]:
-    print("Subsampling...")
-    value = -np.inf
-    if selected is None:
-        selected = []
-    else:
-        selected = list(selected)
-    while len(selected) < len(full_sample) and value < target:
-        # for _ in range(core_basis.dimension):
-        selected.append(greedy_step(selection_metric, full_sample, selected))
-        value = target_metric(full_sample[selected])
-        print(f"  Sample size: {len(selected)}  |  Target metric: {value:.2e} < {target:.2e}")
-    return selected, value
+from greedy_subsampling import fast_greedy_step, Metric, FastMetric
 
 
 def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float, repetitions: int = 10) -> np.ndarray:
@@ -42,14 +27,34 @@ def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float
     return candidates
 
 
-def greedy_draw(selection_metric: Metric, selection_size: int, full_sample: np.ndarray, selected: Optional[list[int]] = None) -> list[int]:
+def greedy_bound(selection_metric_factory: FastMetric, target_metric: Metric, target: float, full_sample: np.ndarray, selected: Optional[list[bool]] = None) -> list[bool]:
     print("Subsampling...")
     if selected is None:
-        selected = []
+        selected = np.full(len(full_sample), False, dtype=bool)
     else:
-        selected = list(selected)
-    while len(selected) < selection_size:
-        selected.append(greedy_step(selection_metric, full_sample, selected))
+        selected = np.array(selected)
+    indices = np.arange(len(full_sample))
+    value = -np.inf
+    for selection_size in range(np.count_nonzero(selected), len(full_sample)):
+        if value >= target:
+            break
+        selection_metric = selection_metric_factory(full_sample[selected])
+        selected[indices[~selected][fast_greedy_step(selection_metric, full_sample[~selected])]] = True
+        value = target_metric(full_sample[selected])
+        print(f"  Sample size: {selection_size}  |  Target metric: {value:.2e} < {target:.2e}")
+    return selected
+
+
+def greedy_draw(selection_metric_factory: FastMetric, selection_size: int, full_sample: np.ndarray, selected: Optional[list[bool]] = None) -> list[bool]:
+    print("Subsampling...")
+    if selected is None:
+        selected = np.full(len(full_sample), False, dtype=bool)
+    else:
+        selected = np.array(selected)
+    indices = np.arange(len(full_sample))
+    for _ in range(selection_size - np.count_nonzero(selected)):
+        selection_metric = selection_metric_factory(full_sample[selected])
+        selected[indices[~selected][fast_greedy_step(selection_metric, full_sample[~selected])]] = True
     return selected
 
 
@@ -57,6 +62,8 @@ TensorTrain = list[np.ndarray]
 
 
 def move_core(tt: TensorTrain, position: int):
+    tt[0] = tt[0][0]
+    tt[1] = tt[1][:, :, 0]
     if position == 0:
         u, s, vt = np.linalg.svd(tt[1])
         u, s, vt = u[:, :rank], s[:rank], vt[:rank]
@@ -69,16 +76,17 @@ def move_core(tt: TensorTrain, position: int):
         tt[1] = s[:, None] * vt @ tt[1]
     else:
         raise ValueError(f"Invalid position '{position}'")
+    tt[0] = tt[0][None]
+    tt[1] = tt[1][:, :, None]
 
 
 def evaluate(tt: TensorTrain, bases: list[Basis], points: np.ndarray) -> np.ndarray:
-    assert points.ndim == 2 and points.shape[1] == len(tt)
-    assert len(tt) == 2
-    lbs = bases[0](points[:, 0])
-    assert lbs.shape == (bases[0].dimension, len(points))
-    rbs = bases[1](points[:, 1])
-    assert rbs.shape == (bases[1].dimension, len(points))
-    return np.einsum("dr,re,di,ei -> i", *tt, lbs, rbs)
+    assert points.ndim == 2 and points.shape[1] == len(tt) == len(bases)
+    result = np.ones((len(points), 1))
+    for m in range(len(tt)):
+        result = np.einsum("nl, ler, en -> nr", result, tt[m], bases[m](points[:, m]))
+    assert result.shape == (len(points), 1)
+    return result[:, 0]
 
 
 class CoreBasis(Basis):
@@ -92,9 +100,9 @@ class CoreBasis(Basis):
     @property
     def dimension(self) -> int:
         assert len(self.tt) == 2
-        assert self.tt[0].shape[1] == self.tt[1].shape[0]
-        rank = self.tt[0].shape[1]
-        dim = self.tt[0].shape[0] if self.core_position == 0 else self.tt[1].shape[1]
+        assert self.tt[0].shape[2] == self.tt[1].shape[0]
+        rank = self.tt[0].shape[2]
+        dim = self.tt[0].shape[1] if self.core_position == 0 else self.tt[1].shape[1]
         return dim * rank
 
     @property
@@ -106,19 +114,19 @@ class CoreBasis(Basis):
         assert len(tt) == 2
         bs = [b(points[:, m]) for m, b in enumerate(self.bases)]
         if self.core_position == 0:
-            return np.einsum("re,di,ei -> dri", self.tt[1], *bs).reshape(self.dimension, len(points))
+            return np.einsum("re,di,ei -> dri", self.tt[1][:, :, 0], *bs).reshape(self.dimension, len(points))
         else:
-            return np.einsum("dr,di,ei -> eri", self.tt[0], *bs).reshape(self.dimension, len(points))
+            return np.einsum("dr,di,ei -> eri", self.tt[0][0, :, :], *bs).reshape(self.dimension, len(points))
 
 
 def create_core_space_sampler(rng: np.random.Generator, core_basis: CoreBasis, discretisation: np.ndarray) -> Sampler:
-    rank = core_basis.tt[0].shape[1]
+    rank = core_basis.tt[0].shape[2]
 
     uni_basis = core_basis.bases[core_basis.core_position]
     uni_density = lambda idx: lambda x: uni_basis(x)[idx]**2 * rho(x)
     uni_christoffel = lambda x: np.sum(uni_basis(x)**2, axis=0)
 
-    red_transform = core_basis.tt[1] if core_basis.core_position == 0 else core_basis.tt[0].T
+    red_transform = core_basis.tt[1][:, :, 0] if core_basis.core_position == 0 else core_basis.tt[0][0].T
     red_basis = TransformedBasis(red_transform, core_basis.bases[1 - core_basis.core_position])
     red_density = lambda idx: lambda x: red_basis(x)[idx]**2 * rho(x)
     red_christoffel = lambda x: np.sum(red_basis(x)**2, axis=0)
@@ -157,7 +165,7 @@ if __name__ == "__main__":
     from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel, kernel_matrix
     from rkhs_nd import TensorProductKernel
     from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis
-    from greedy_subsampling import eta_metric, lambda_metric, lambda_to_mu, mu_to_lambda, suboptimality_metric
+    from greedy_subsampling import fast_eta_metric, lambda_metric, suboptimality_metric
     from least_squares import optimal_least_squares
 
     rng = np.random.default_rng(0)
@@ -168,7 +176,7 @@ if __name__ == "__main__":
     # basis_name = "fourier"
     space = ["h10", "h1", "h1gauss"][1]
 
-    target_mu = 50
+    target_suboptimality = 50
     debiasing_sample_size = 1
     max_iteration = 1000
 
@@ -177,6 +185,7 @@ if __name__ == "__main__":
 
     # Original algorithm
     used_parameters = {"draw_for_stability", "use_debiasing"}
+    used_parameters = {"draw_for_stability_bound", "use_debiasing"}
 
     # # Try to use fewer samples by updating only in the subspace where G(x) is stable.
     # #     Note that this is a generalisation of the conditionally stable projector from Cohen and Migliorati.
@@ -189,7 +198,8 @@ if __name__ == "__main__":
     # used_parameters = {"use_stable_projection", "use_debiasing"}
 
     # Reference algorithm (only use the RKHS projection)
-    used_parameters = {"draw_for_stability",}
+    # used_parameters = {"draw_for_stability",}
+    # used_parameters = {"draw_for_stability_bound",}
 
     assert used_parameters <= all_parameters
     for parameter in used_parameters:
@@ -202,7 +212,7 @@ if __name__ == "__main__":
     for parameter in sorted(all_parameters):
         print(f"    {parameter:<{max_parameter_len}s} = {globals()[parameter]}")
 
-    assert draw_for_stability or use_debiasing
+    assert draw_for_stability or draw_for_stability_bound or use_debiasing
 
 
     ranks = [2, 4, 6]
@@ -289,7 +299,7 @@ if __name__ == "__main__":
     # fig, ax = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
     for rank in ranks:
         print(f"Initialise TT of rank {rank}")
-        tt: TensorTrain = [rng.standard_normal(size=(dimension, rank)), rng.standard_normal(size=(rank, dimension))]
+        tt: TensorTrain = [rng.standard_normal(size=(1, dimension, rank)), rng.standard_normal(size=(rank, dimension, 1))]
 
         full_sample = np.empty(shape=(0, 2), dtype=float)
         full_values = np.empty(shape=(0,), dtype=float)
@@ -308,36 +318,32 @@ if __name__ == "__main__":
             print(f"Relative test set error: {test_error:.2e}")
 
             core_basis_rkhs = CoreBasis(tt, [rkhs_basis]*2, core_position)
-            eta = eta_metric(product_kernel, core_basis_rkhs)
+            eta_factory = lambda points: fast_eta_metric(product_kernel, core_basis_rkhs, points)
             lambda_ = lambda_metric(product_kernel, core_basis_rkhs)
             suboptimality = suboptimality_metric(product_kernel, core_basis_rkhs)
 
-            print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {suboptimality(full_sample):.1f} < {np.sqrt(1 + target_mu**2):.1f}")
-            if draw_for_stability:
-                current_lambda = lambda_(full_sample)
-                if lambda_to_mu(current_lambda) > target_mu:
-                    candidates = ensure_stability(core_basis_rkhs, lambda_, mu_to_lambda(target_mu))
+            current_suboptimality = suboptimality(full_sample)
+            print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}")
+            if draw_for_stability or draw_for_stability_bound:
+                if current_suboptimality > target_suboptimality:
+                    # suboptimality = sqrt(1 + mu^2 tau^2) --> mu^2 = (suboptimality^2 - 1) / tau^2 --> lambda = 1 / mu^2
+                    candidates = ensure_stability(core_basis_rkhs, lambda_, 1 / (target_suboptimality**2 - 1))
                     candidates = np.concatenate([full_sample, candidates], axis=0)
-                    selected = list(range(len(full_sample)))
+                    selected = np.full(len(candidates), False, dtype=bool)
+                    selected[:len(full_sample)] = True
                     selection_size = max(len(full_sample) + 2, 2 * core_basis_rkhs.dimension)
-                    selected = greedy_draw(eta, selection_size, candidates, selected)
-                    assert np.all(np.asarray(selected[:len(full_sample)]) == np.arange(len(full_sample)))
+                    if draw_for_stability:
+                        selected = greedy_draw(eta_factory, selection_size, candidates, selected)
+                    else:
+                        assert draw_for_stability_bound
+                        selected = greedy_bound(eta_factory, lambda_, 1 / (target_suboptimality**2 - 1), candidates, selected)
+                    assert np.all(selected[:len(full_sample)])
                     new_selected = selected[len(full_sample):]
-                    full_values = np.concatenate([full_values, target(candidates[new_selected])], axis=0)
+                    full_values = np.concatenate([full_values, target(candidates[len(full_sample):][new_selected])], axis=0)
                     full_sample = candidates[selected]
-                    selected_lambda = lambda_(full_sample)
-                    # candidates = ensure_stability(core_basis, lambda_, mu_to_lambda(target_mu))
-                    # candidates = np.concatenate([full_sample, candidates], axis=0)
-                    # selected = list(range(len(full_sample)))
-                    # selected, selected_lambda = greedy_bound(eta, lambda_, mu_to_lambda(target_mu), candidates, selected)
-                    # assert np.all(np.asarray(selected[:len(full_sample)]) == np.arange(len(full_sample)))
-                    # new_selected = selected[len(full_sample):]
-                    # full_values = np.concatenate([full_values, target(candidates[new_selected])], axis=0)
-                    # full_sample = candidates[selected]
-                else:
-                    selected_lambda = current_lambda
-                assert full_values.ndim == 1 and full_sample.shape == (len(full_values), 2)
-                print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {suboptimality(full_sample):.1f} < {np.sqrt(1 + target_mu**2):.1f}")
+                    assert full_values.ndim == 1 and full_sample.shape == (len(full_values), 2)
+                    current_suboptimality = suboptimality(full_sample)
+                    print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}")
 
             K = kernel_matrix(product_kernel, full_sample)
             es = np.linalg.eigvalsh(K)
@@ -402,7 +408,7 @@ if __name__ == "__main__":
             if update_in_stable_space:
                 update_core = P.T @ optimal_least_squares(full_sample, full_grad, product_kernel, stable_basis)
             elif use_stable_projection:
-                if suboptimality(full_sample) <= target_mu:
+                if current_suboptimality <= target_suboptimality:
                     update_core = optimal_least_squares(full_sample, full_grad, product_kernel, core_basis_rkhs)
                 else:
                     update_core = np.full(tt[core_position].size, fill_value=0.0, dtype=float)
@@ -430,9 +436,9 @@ if __name__ == "__main__":
 
             assert len(tt) == 2
             if core_position == 0:
-                update_core = update_core.reshape(dimension, rank)
+                update_core = update_core.reshape(dimension, rank)[None]
             else:
-                update_core = update_core.reshape(dimension, rank).T
+                update_core = update_core.reshape(dimension, rank).T[:, :, None]
             tt[core_position] -= step_size * update_core
 
             if use_debiasing:
@@ -474,5 +480,5 @@ if __name__ == "__main__":
     plt.savefig(
         plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
     )
-    plt.show()
+    # plt.show()
     plt.close(fig)
