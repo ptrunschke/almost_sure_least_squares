@@ -264,8 +264,8 @@ if __name__ == "__main__":
     else:
         discrete_l2_gramian = compute_discrete_gramian("l2", rkhs_basis.domain, 2 ** 13)
     rkhs_basis, l2_norms = orthogonalise(rkhs_basis, *discrete_l2_gramian)
-    l2_normalise = np.diag(1 / l2_norms)
-    l2_basis = TransformedBasis(l2_normalise, rkhs_basis)
+    l2_basis = TransformedBasis(np.diag(1 / l2_norms), rkhs_basis)
+    rkhs_to_l2 = np.diag(l2_norms)
 
 
     if space in ["h1", "h10"]:
@@ -409,8 +409,9 @@ if __name__ == "__main__":
 
             if use_debiasing:
                 print("Draw debiasing sample...")
-                core_basis_l2 = CoreBasis(tt, [l2_basis]*2)
-                # TODO: The basis is wrong! We should use a transformed version of tt!
+                core_space_l2 = TensorTrainCoreSpace(tt)
+                core_space_l2, (tl, te, tr) = core_space_l2.transform([rkhs_to_l2] * tt.order)
+                core_basis_l2 = CoreBasis(core_space_l2.tensor_train, [l2_basis]*2)
                 debiasing_sample, debiasing_weights = draw_weighted_sequence(create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size)
                 debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
                 assert debiasing_weights.shape == (len(debiasing_sample),)
@@ -419,10 +420,23 @@ if __name__ == "__main__":
                 assert np.all(np.isfinite(debiasing_grad))
                 residual = debiasing_grad - core_basis_rkhs(debiasing_sample).T @ update_core
                 assert np.all(np.isfinite(residual))
-                debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_rkhs)
-                # TODO: ideally, i would like to compute
-                #     quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_l2)
-                #     and then perform a change of basis to core_basis_rkhs
+
+                # debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_rkhs)
+
+                # NOTE: Ideally, we would like to compute the quasi-projection w.r.t. the L2 basis and then perform a change of basis to the RKHS basis.
+                # Consider a function v(x) = c @ b(x) where b is a V-orthonormal basis.
+                # Moreover, suppose that B = M @ b is a change of basis to an L2-orthonormal basis.
+                # The quasi-projection of a function u in L2 with respect to the basis B is given by g = u(x) @ B(x).T @ B.
+                # To add the function g to v, we have to perform a change of basis first:
+                #     g = (u(x) @ B(x).T) @ B = (u(x) @ b(x).T) @ M.T @ M @ b.
+                # Therefore
+                #     f + g = c + (u(x) @ b(x).T) @ M.T @ M .
+                # This means that we can perform a quasi-projection w.r.t. the basis B by performing a quasi-projection w.r.t.
+                # the basis b and multiplying the resulting coefficients with M.T @ M.
+                # We know that the TT satisfies M.T @ M comes from the core space transform.
+                debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_l2)
+                debiasing_core = contract("ler, Ll, Ee, Rr -> LER", debiasing_core.reshape(tt.core.shape), tl.T @ tl, te.T @ te, tr.T @ tr).reshape(-1)
+
                 assert np.all(np.isfinite(debiasing_core))
                 update_core += debiasing_core
 
