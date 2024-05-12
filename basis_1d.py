@@ -161,6 +161,23 @@ def compute_discrete_gramian(space: str, domain: tuple[float, float], gridpoints
     return I, xs
 
 
+def orthogonalise(basis: Basis, discrete_gramian: np.ndarray, discretisation: np.ndarray) -> tuple[Basis, list[float]]:
+    assert discretisation.ndim == 1
+    assert discrete_gramian.shape == (len(discretisation), len(discretisation))
+    assert np.all(discretisation[:-1] < discretisation[1:])
+
+    basisval = basis(discretisation)
+    assert basisval.shape == (basis.dimension, len(discretisation))
+    gramian = basisval @ discrete_gramian @ basisval.T
+    es, vs = np.linalg.eigh(gramian)
+    mask = es > 1e-12
+    es, vs = np.sqrt(es[mask]), vs[:, mask]
+
+    res = TransformedBasis(vs.T, basis)
+    res._domain = discretisation[0], discretisation[-1]
+    return res, es
+
+
 def orthonormalise(basis: Basis, discrete_gramian: np.ndarray, discretisation: np.ndarray) -> Basis:
     assert discretisation.ndim == 1
     assert discrete_gramian.shape == (len(discretisation), len(discretisation))
