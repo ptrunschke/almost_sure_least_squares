@@ -220,14 +220,36 @@ if __name__ == "__main__":
     #     assert np.allclose(np.asarray(rkhs_basis.domain), [-1, 1])
     #     points = (points + 1) / 2  # transform points to interval [0, 1]
     #     return (1 + points @ cs)**(-(len(cs) + 1))
+    # target.__name__ = "corner_peak"
+
+    # def target(points: np.ndarray) -> np.ndarray:
+    #     points = np.asarray(points)
+    #     assert points.ndim == 2 and points.shape[1] == 2
+    #     return np.cos(points[:, 0] + points[:, 1]) * np.exp(points[:, 0] * points[:, 1])
+    # target.__name__ = "cheng_sandu"
 
     def target(points: np.ndarray) -> np.ndarray:
         # Anthony's test function
         points = np.asarray(points)
+        assert np.allclose(np.asarray(rkhs_basis.domain), [-1, 1])
         points = (points + 1) / 2  # transform points to interval [0, 1]
         return 1 / (1 + np.sum(points, axis=1))
+    target.__name__ = "anthony"
+
+    # def target(points: np.ndarray) -> np.ndarray:
+    #     points = np.asarray(points)
+    #     # cs = np.ones(l2_basis.dimension)
+    #     # cs[max(ranks):] = 0
+    #     cs = 1 / np.arange(1, l2_basis.dimension + 1)
+    #     bs = 1
+    #     for ps in points.T:
+    #         bs *= l2_basis(ps)
+    #     assert bs.shape == (l2_basis.dimension, len(points))
+    #     return cs @ bs
+    # target.__name__ = "full_rank"
 
 
+    postfix = set()
     print(f"Approximating: {target.__name__}")
     print("Algorithm parameters:")
     max_parameter_len = max(len(p) for p in all_parameters)
@@ -312,6 +334,7 @@ if __name__ == "__main__":
             core_position = (core_position + 1) % 2
             move_core(tt, core_position)
             step_size = 1 / np.sqrt(it + 1)
+            # step_size = 1; postfix |= {"ss1",}
             print(f"Iteration: {it}  |  Core position: {core_position}  |  Step size: {step_size:.2e}")
 
             test_error = compute_test_error(tt)
@@ -477,7 +500,10 @@ if __name__ == "__main__":
 
     plot_directory = Path(__file__).parent / "plot"
     plot_directory.mkdir(exist_ok=True)
-    plot_path = plot_directory / ("als_" + "_".join(sorted(used_parameters)) + ".png")
+    plot_file = f"als_{target.__name__}"
+    plot_file += "_" + "_".join(sorted(used_parameters))
+    plot_file += ("_" if postfix else "") + "_".join(sorted(postfix))
+    plot_path = plot_directory / f"{plot_file}.png"
     print("Saving sample statistics plot to", plot_path)
     plt.savefig(
         plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
