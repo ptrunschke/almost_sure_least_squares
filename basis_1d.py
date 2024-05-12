@@ -140,7 +140,7 @@ def compute_discrete_gramian(space: str, domain: tuple[float, float], gridpoints
         x = ufl.SpatialCoordinate(fe_domain)
         rho = ufl.exp(-x[0]**2 / 2) / np.sqrt(2 * np.pi)
     else:
-        raise ValueError(f"invalid space for orthonormalise(): '{space}'")
+        raise ValueError(f"invalid space for compute_discrete_gramian(): '{space}'")
 
     if space == "h10":
         I = inner(grad(u), grad(v)) * rho * dx
@@ -150,7 +150,7 @@ def compute_discrete_gramian(space: str, domain: tuple[float, float], gridpoints
         I = inner(grad(u), grad(v)) * rho * dx
         I += inner(u, v) * rho * dx
     else:
-        raise ValueError(f"invalid space for orthonormalise(): '{space}'")
+        raise ValueError(f"invalid space for compute_discrete_gramian(): '{space}'")
     I = fem.assemble_matrix(fem.form(I), bcs=bcs).to_scipy()
 
     xs = fe_domain.geometry.x

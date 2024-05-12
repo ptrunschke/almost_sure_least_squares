@@ -181,7 +181,7 @@ if __name__ == "__main__":
     max_iteration = 1000
 
 
-    all_parameters = {"draw_for_stability", "update_in_stable_space", "use_stable_projection", "use_debiasing"}
+    all_parameters = {"draw_for_stability", "draw_for_stability_bound", "update_in_stable_space", "use_stable_projection", "use_debiasing"}
 
     # Original algorithm
     used_parameters = {"draw_for_stability", "use_debiasing"}
@@ -207,11 +207,6 @@ if __name__ == "__main__":
     for parameter in all_parameters - used_parameters:
         globals()[parameter] = False
 
-    print("Algorithm parameters:")
-    max_parameter_len = max(len(p) for p in all_parameters)
-    for parameter in sorted(all_parameters):
-        print(f"    {parameter:<{max_parameter_len}s} = {globals()[parameter]}")
-
     assert draw_for_stability or draw_for_stability_bound or use_debiasing
 
 
@@ -231,6 +226,13 @@ if __name__ == "__main__":
         points = np.asarray(points)
         points = (points + 1) / 2  # transform points to interval [0, 1]
         return 1 / (1 + np.sum(points, axis=1))
+
+
+    print(f"Approximating: {target.__name__}")
+    print("Algorithm parameters:")
+    max_parameter_len = max(len(p) for p in all_parameters)
+    for parameter in sorted(all_parameters):
+        print(f"    {parameter:<{max_parameter_len}s} = {globals()[parameter]}")
 
 
     if space == "h10":
