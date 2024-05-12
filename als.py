@@ -164,11 +164,12 @@ if __name__ == "__main__":
 
     from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel, kernel_matrix
     from rkhs_nd import TensorProductKernel
-    from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis
+    from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, orthogonalise, MonomialBasis, FourierBasis, SinBasis
     from greedy_subsampling import fast_eta_metric, lambda_metric, suboptimality_metric
     from least_squares import optimal_least_squares
 
     rng = np.random.default_rng(0)
+    postfix = set()
 
     # dimension = 5
     dimension = 10
@@ -177,14 +178,15 @@ if __name__ == "__main__":
     space = ["h10", "h1", "h1gauss"][1]
 
     target_suboptimality = 50
+    # target_suboptimality = 5; prefix = "ts5"
     debiasing_sample_size = 1
-    max_iteration = 1000
+    max_iteration = 2000
 
 
     all_parameters = {"draw_for_stability", "draw_for_stability_bound", "update_in_stable_space", "use_stable_projection", "use_debiasing"}
 
     # Original algorithm
-    used_parameters = {"draw_for_stability", "use_debiasing"}
+    # used_parameters = {"draw_for_stability", "use_debiasing"}
     used_parameters = {"draw_for_stability_bound", "use_debiasing"}
 
     # # Try to use fewer samples by updating only in the subspace where G(x) is stable.
@@ -249,7 +251,6 @@ if __name__ == "__main__":
     # target.__name__ = "full_rank"
 
 
-    postfix = set()
     print(f"Approximating: {target.__name__}")
     print("Algorithm parameters:")
     max_parameter_len = max(len(p) for p in all_parameters)
@@ -295,14 +296,24 @@ if __name__ == "__main__":
 
     discretisation = np.linspace(*initial_basis.domain, 1000)
 
-    if space == "h1gauss":
-        discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)
-    else:
-        discrete_l2_gramian = compute_discrete_gramian("l2", initial_basis.domain, 2 ** 13)
-    l2_basis = orthonormalise(initial_basis, *discrete_l2_gramian)
+    # if space == "h1gauss":
+    #     discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)
+    # else:
+    #     discrete_l2_gramian = compute_discrete_gramian("l2", initial_basis.domain, 2 ** 13)
+    # l2_basis = orthonormalise(initial_basis, *discrete_l2_gramian)
+
+    # discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2 ** 13)
+    # rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
 
     discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2 ** 13)
     rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
+    if space == "h1gauss":
+        discrete_l2_gramian = compute_discrete_gramian("l2gauss", rkhs_basis.domain, 2 ** 13)
+    else:
+        discrete_l2_gramian = compute_discrete_gramian("l2", rkhs_basis.domain, 2 ** 13)
+    rkhs_basis, l2_norms = orthogonalise(rkhs_basis, *discrete_l2_gramian)
+    l2_normalise = np.diag(1 / l2_norms)
+    l2_basis = TransformedBasis(l2_normalise, rkhs_basis)
 
 
     if space in ["h1", "h10"]:
@@ -469,12 +480,12 @@ if __name__ == "__main__":
             if use_debiasing:
                 full_sample = np.concatenate([full_sample, debiasing_sample], axis=0)
                 full_values = np.concatenate([full_values, debiasing_values], axis=0)
-            print()
 
-            # TODO: instead of a fixed number of iterations, stop if the error does not change for 10 iterations or so...
-            mean_derivative = np.mean(np.nan_to_num(abs(np.diff(np.log(errors[-50:])) / np.diff(sample_sizes[-50:]))))
-            if mean_derivative <= 0.01:
+            max_derivative = np.log(np.max(errors[-50:])) - np.log(np.min(errors[-50:]))
+            print(f"Max derivative: {max_derivative:.2e}")
+            if len(errors) >= 50 and max_derivative <= 0.05:
                 break
+            print()
 
         test_error = compute_test_error(tt)
         errors.append(test_error)
