@@ -27,9 +27,7 @@ class TensorTrain(object):
             ):
                 raise ValueError("inconsistent shapes of components")
             self._components = [np.array(component) for component in from_components]
-            self._core_position = self.order
-            while self._core_position > 0:
-                self.move_core("left")
+            self.canonicalise("left")
         elif from_tt is not None:
             if not isinstance(from_tt, TensorTrain):
                 raise TypeError("from_tt must be a TensorTrain")
@@ -43,7 +41,7 @@ class TensorTrain(object):
         assert 0 < len(dimensions) == len(ranks) - 1
         assert all(d > 0 for d in dimensions)
         assert all(r > 0 for r in ranks) and ranks[0] == ranks[-1] == 1
-        components = [rng.standard_normal(rl, d, rr) for rl, d, rr in zip(ranks, dimensions, ranks[1:])]
+        components = [rng.standard_normal(size=(rl, d, rr)) for rl, d, rr in zip(ranks, dimensions, ranks[1:])]
         return cls(from_components=components)
 
     @property
@@ -57,6 +55,10 @@ class TensorTrain(object):
     @property
     def ranks(self) -> list[int]:
         return [1] + [component.shape[2] for component in self._components]
+
+    @property
+    def parameters(self) -> int:
+        return sum(component.size for component in self._components)
 
     def move_core(
         self, direction: Literal["left"] | Literal["right"], rounding_condition: Optional[RoundingCondition] = None
@@ -102,7 +104,7 @@ class TensorTrain(object):
             self._components[self._core_position] = vt.reshape(len(s), e, r)
             self._core_position -= 1
             self._components[self._core_position] = contract(
-                "leR,Rr -> ler", self._components[self._core_position], u * s
+                "leR, Rr -> ler", self._components[self._core_position], u * s
             )
         elif direction == "right":
             if self._core_position == self.order - 1:
@@ -119,7 +121,7 @@ class TensorTrain(object):
             self._components[self._core_position] = u.reshape(l, e, len(s))
             self._core_position += 1
             self._components[self._core_position] = contract(
-                "lL,Ler -> ler", s[:, None] * vt, self._components[self._core_position]
+                "lL, Ler -> ler", s[:, None] * vt, self._components[self._core_position]
             )
         else:
             raise TypeError(f'unknown direction. Expected "left" or "right" but got "{direction}"')
@@ -186,6 +188,13 @@ class TensorTrain(object):
             conditioning = contract("l, lr -> r", conditioning, component[:, sample[position], :])
         return sample
 
+    def transform(self, rank_one_transform: list[Float[np.ndarray, "new_dimension old_dimension"]]) -> TensorTrain:
+        return TensorTrainCoreSpace(self).transform(rank_one_transform)[0].tensor_train
+
+    def evaluate(self, rank_one_measurement: list[Float[np.ndarray, "dimension sample_size"]]) -> Float[np.ndarray, "sample_size"]:
+        ln, en, rn = TensorTrainCoreSpace(self).evaluate(rank_one_measurement)
+        return contract("ler, ln, en, rn -> n", self.core, ln, en, rn)
+
 
 class TensorTrainCoreSpace(object):
     def __init__(self, tensor_train: TensorTrain):
@@ -215,11 +224,11 @@ class TensorTrainCoreSpace(object):
 
         left_space_measurement = np.ones((1, sample_size))
         for measure, component in zip(
-            rank_one_measurement, self.tensor_train._components[: self.tensor_train._core_position]
+            rank_one_measurement, self.tensor_train._components[: self.tensor_train.core_position]
         ):
-            left_space_measurement = contract("ln, en, ler -> nr", left_space_measurement, measure, component)
+            left_space_measurement = contract("ln, en, ler -> rn", left_space_measurement, measure, component)
         assert left_space_measurement.shape == (
-            self.tensor_train._components[self.tensor_train._core_position].shape[0],
+            self.tensor_train.core.shape[0],
             sample_size,
         )
 
@@ -228,9 +237,9 @@ class TensorTrainCoreSpace(object):
             reversed(rank_one_measurement),
             reversed(self.tensor_train._components[self.tensor_train._core_position + 1 :]),
         ):
-            right_space_measurement = contract("ler, en, rn -> nl", component, measure, right_space_measurement)
+            right_space_measurement = contract("ler, en, rn -> ln", component, measure, right_space_measurement)
         assert right_space_measurement.shape == (
-            self.tensor_train._components[self.tensor_train._core_position].shape[2],
+            self.tensor_train.core.shape[2],
             sample_size,
         )
 
@@ -271,7 +280,7 @@ class TensorTrainCoreSpace(object):
             raise ValueError("inconsistent dimensions of univariate measurements")
 
         result = TensorTrain(from_tt=self.tensor_train)
-        for position in range(self.order):
+        for position in range(result.order):
             result._components[position] = contract(
                 "de, ler -> ldr", rank_one_transform[position], result._components[position]
             )
@@ -279,33 +288,51 @@ class TensorTrainCoreSpace(object):
         core_position = result._core_position
         core = result.core
 
-        result._components[core_position] = np.eye(core.shape[0])
+        result._components[core_position] = np.eye(core.shape[0])[:, :, None]
         result._core_position = 0
         while result.core_position < core_position:
             result.move_core("right")
-        left_transform = result._components[core_position]
+        left_transform = result._components[core_position][:, :, 0]
 
-        result._components[core_position] = np.eye(core.shape[2])
-        result._core_position = self.order - 1
+        result._components[core_position] = np.eye(core.shape[2])[None, :, :]
+        result._core_position = result.order - 1
         while result.core_position > core_position:
             result.move_core("left")
-        right_transform = result._components[core_position]
+        right_transform = result._components[core_position][0, :, :]
 
-        core = contract("LER, lL, rR -> ler", core, left_transform, right_transform)
+        core = contract("lEr, Ll, Rr -> LER", core, left_transform, right_transform)
         result._components[core_position] = core
         return TensorTrainCoreSpace(result), (left_transform, rank_one_transform[core_position], right_transform)
+
+    def christoffel(self, point: FVector, bases: list[Basis]) -> float:
+        assert isinstance(point, FVector)
+        assert len(point) == len(bases) == self.tensor_train.order
+        assert all(basis.dimension == dimension for basis, dimension in zip(bases, self.tensor_train.dimensions))
+        bs = [basis(point.reshape(1, -1)[:, pos]) for pos, basis in enumerate(bases)]
+        ln, en, rn = self.evaluate(bs)
+        core = self.tensor_train.core
+        assert ln.shape == (core.shape[0], 1) and en.shape == (core.shape[1], 1) and rn.shape == (core.shape[2], 1)
+        return np.sum(ln**2) * np.sum(en**2) * np.sum(rn**2) / core.size
 
     def christoffel_sample(
         self, rng: np.random.Generator, bases: list[Basis], densities: list[Density], discretisations: list[FVector]
     ) -> Float[np.ndarray, "dimension"]:
         assert len(bases) == len(densities) == len(discretisations) == self.tensor_train.order
-        transform = lambda pos: bases[pos](discretisations[pos]) * np.sqrt(densities[pos](discretisations[pos]))
-        discretised_basis, _ = self.transform([transform(pos) for pos in range(self.tensor_train.order)])
-        sqrt_density = TensorTrain(from_tt=discretised_basis.tensor_train)
+        assert all(basis.dimension == dimension for basis, dimension in zip(bases, self.tensor_train.dimensions))
+
+        # Draw a basis function to sample.
+        left_index = rng.integers(0, self.tensor_train.core.shape[0])
+        middle_index = rng.integers(0, self.tensor_train.core.shape[1])
+        right_index = rng.integers(0, self.tensor_train.core.shape[2])
+
+        # Represent the chosen basis function as a tensor train.
+        sqrt_density = TensorTrain(from_tt=self.tensor_train)
         core = sqrt_density.core
-        left_index = rng.integers(0, core.shape[0])
-        middle_index = rng.integers(0, core.shape[1])
-        right_index = rng.integers(0, core.shape[2])
         core[:] = 0
         core[left_index, middle_index, right_index] = 1
-        return sqrt_density.sample_from_square()
+
+        # Discretise sqrt_density.
+        transform = lambda pos: (bases[pos](discretisations[pos]) * np.sqrt(densities[pos](discretisations[pos]))).T
+        sqrt_density = sqrt_density.transform([transform(pos) for pos in range(self.tensor_train.order)])
+        indices = sqrt_density.sample_from_square(rng)
+        return [d[i] for d, i in zip(discretisations, indices)]

@@ -1,9 +1,12 @@
 from __future__ import annotations
 from typing import Optional
+from jaxtyping import Float
 import numpy as np
+from opt_einsum import contract
 from basis_1d import TransformedBasis, Basis
-from sampling import draw_sample, draw_weighted_sequence, Sampler
+from sampling import draw_weighted_sequence, Sampler
 from greedy_subsampling import fast_greedy_step, Metric, FastMetric
+from tensor_train import TensorTrain, TensorTrainCoreSpace
 
 
 def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float, repetitions: int = 10) -> np.ndarray:
@@ -58,91 +61,39 @@ def greedy_draw(selection_metric_factory: FastMetric, selection_size: int, full_
     return selected
 
 
-TensorTrain = list[np.ndarray]
-
-
-def move_core(tt: TensorTrain, position: int):
-    tt[0] = tt[0][0]
-    tt[1] = tt[1][:, :, 0]
-    if position == 0:
-        u, s, vt = np.linalg.svd(tt[1])
-        u, s, vt = u[:, :rank], s[:rank], vt[:rank]
-        tt[0] = tt[0] @ u * s
-        tt[1] = vt
-    elif position == 1:
-        u, s, vt = np.linalg.svd(tt[0])
-        u, s, vt = u[:, :rank], s[:rank], vt[:rank]
-        tt[0] = u
-        tt[1] = s[:, None] * vt @ tt[1]
-    else:
-        raise ValueError(f"Invalid position '{position}'")
-    tt[0] = tt[0][None]
-    tt[1] = tt[1][:, :, None]
-
-
-def evaluate(tt: TensorTrain, bases: list[Basis], points: np.ndarray) -> np.ndarray:
-    assert points.ndim == 2 and points.shape[1] == len(tt) == len(bases)
-    result = np.ones((len(points), 1))
-    for m in range(len(tt)):
-        result = np.einsum("nl, ler, en -> nr", result, tt[m], bases[m](points[:, m]))
-    assert result.shape == (len(points), 1)
-    return result[:, 0]
-
-
 class CoreBasis(Basis):
-    def __init__(self, tt: TensorTrain, bases: list[Basis], core_position: int):
-        assert len(tt) == len(bases)
-        assert 0 <= core_position < len(tt)
-        self.tt = tt
+    def __init__(self, tt: TensorTrain, bases: list[Basis]):
+        assert tt.order == len(bases)
+        self.core_space = TensorTrainCoreSpace(tt)
         self.bases = bases
-        self.core_position = core_position
 
     @property
     def dimension(self) -> int:
-        assert len(self.tt) == 2
-        assert self.tt[0].shape[2] == self.tt[1].shape[0]
-        rank = self.tt[0].shape[2]
-        dim = self.tt[0].shape[1] if self.core_position == 0 else self.tt[1].shape[1]
-        return dim * rank
+        return self.core_space.tensor_train.core.size
 
     @property
     def domain(self) -> list[tuple[float, float]]:
         return [b.domain for b in self.bases]
 
-    def __call__(self, points: np.ndarray) -> np.ndarray:
-        assert points.ndim == 2 and points.shape[1] == len(self.tt)
-        assert len(tt) == 2
+    def __call__(self, points: Float[np.ndarray, "sample_size dimension"]) -> Float[np.ndarray, "core_dimension sample_size"]:
+        assert points.ndim == 2 and points.shape[1] == self.core_space.tensor_train.order
         bs = [b(points[:, m]) for m, b in enumerate(self.bases)]
-        if self.core_position == 0:
-            return np.einsum("re,di,ei -> dri", self.tt[1][:, :, 0], *bs).reshape(self.dimension, len(points))
-        else:
-            return np.einsum("dr,di,ei -> eri", self.tt[0][0, :, :], *bs).reshape(self.dimension, len(points))
+        ln, en, rn = self.core_space.evaluate(bs)
+        return contract("ln, en, rn -> lern", ln, en, rn).reshape(self.dimension, points.shape[0])
 
 
-def create_core_space_sampler(rng: np.random.Generator, core_basis: CoreBasis, discretisation: np.ndarray) -> Sampler:
-    rank = core_basis.tt[0].shape[2]
+def evaluate(tt: TensorTrain, bases: list[Basis], points: Float[np.ndarray, "sample_size dimension"]) -> Float[np.ndarray, "sample_size"]:
+    return CoreBasis(tt, bases)(points).T @ tt.core.reshape(-1)
 
-    uni_basis = core_basis.bases[core_basis.core_position]
-    uni_density = lambda idx: lambda x: uni_basis(x)[idx]**2 * rho(x)
-    uni_christoffel = lambda x: np.sum(uni_basis(x)**2, axis=0)
 
-    red_transform = core_basis.tt[1][:, :, 0] if core_basis.core_position == 0 else core_basis.tt[0][0].T
-    red_basis = TransformedBasis(red_transform, core_basis.bases[1 - core_basis.core_position])
-    red_density = lambda idx: lambda x: red_basis(x)[idx]**2 * rho(x)
-    red_christoffel = lambda x: np.sum(red_basis(x)**2, axis=0)
-
-    def core_space_sampler(conditioned_on: Optional[tuple[list[float], list[float]]] = None) -> float:
-        uni_idx = rng.integers(0, core_basis.bases[core_basis.core_position].dimension)
-        uni_sample = draw_sample(rng=rng, density=uni_density(uni_idx), discretisation=discretisation)
-        red_idx = rng.integers(0, rank)
-        red_sample = draw_sample(rng=rng, density=red_density(red_idx), discretisation=discretisation)
-
-        weight = core_basis.dimension / uni_christoffel(uni_sample) / red_christoffel(red_sample)
-
-        if core_basis.core_position == 0:
-            return np.array([uni_sample, red_sample]), weight
-        else:
-            return np.array([red_sample, uni_sample]), weight
+def create_core_space_sampler(rng: np.random.Generator, core_basis: CoreBasis, discretisation: Float[np.ndarray, "discretisation"]) -> Sampler:
+    core_space = core_basis.core_space
+    order = core_space.tensor_train.order
+    def core_space_sampler(conditioned_on : Optional[tuple[list[Float[np.ndarray, "dimension"]], list[float]]] = None) -> tuple[Float[np.ndarray, "dimension"], float]:
+        sample = core_space.christoffel_sample(rng, core_basis.bases, [rho] * order, [discretisation] * order)
+        sample = np.array(sample, dtype=float)
+        weight = 1 / core_space.christoffel(sample, core_basis.bases)
+        return sample, weight
     return core_space_sampler
 
 
@@ -212,6 +163,7 @@ if __name__ == "__main__":
     assert draw_for_stability or draw_for_stability_bound or use_debiasing
 
 
+    order = 2
     ranks = [2, 4, 6]
 
     # def target(points: np.ndarray) -> np.ndarray:
@@ -325,7 +277,7 @@ if __name__ == "__main__":
     test_values = target(test_sample)
 
     def compute_test_error(tt: TensorTrain) -> float:
-        prediction = evaluate(tt, [rkhs_basis]*len(tt), test_sample)
+        prediction = evaluate(tt, [rkhs_basis]*tt.order, test_sample)
         assert prediction.shape == test_values.shape
         return np.linalg.norm(prediction - test_values, ord=2) / np.linalg.norm(test_values, ord=2)
 
@@ -334,32 +286,35 @@ if __name__ == "__main__":
     # fig, ax = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
     for rank in ranks:
         print(f"Initialise TT of rank {rank}")
-        tt: TensorTrain = [rng.standard_normal(size=(1, dimension, rank)), rng.standard_normal(size=(rank, dimension, 1))]
+        tt = TensorTrain.random(rng, [dimension]*order, [1] + [rank]*(order-1) + [1])
 
         full_sample = np.empty(shape=(0, 2), dtype=float)
         full_values = np.empty(shape=(0,), dtype=float)
         core_position = -1
         errors = []
         sample_sizes = []
+        assert tt.core_position == 0
+        all_directions = {0: "right", tt.order - 1: "left"}
         for it in range(max_iteration):
-            core_position = (core_position + 1) % 2
-            move_core(tt, core_position)
+            if tt.core_position in all_directions:
+                direction = all_directions[tt.core_position]
+            tt.move_core(direction)
             step_size = 1 / np.sqrt(it + 1)
             # step_size = 1; postfix |= {"ss1",}
-            print(f"Iteration: {it}  |  Core position: {core_position}  |  Step size: {step_size:.2e}")
+            print(f"Iteration: {it}  |  Core position: {tt.core_position}  |  Step size: {step_size:.2e}")
 
             test_error = compute_test_error(tt)
             errors.append(test_error)
             sample_sizes.append(len(full_sample))
             print(f"Relative test set error: {test_error:.2e}")
 
-            core_basis_rkhs = CoreBasis(tt, [rkhs_basis]*2, core_position)
+            core_basis_rkhs = CoreBasis(tt, [rkhs_basis]*2)
             eta_factory = lambda points: fast_eta_metric(product_kernel, core_basis_rkhs, points)
             lambda_ = lambda_metric(product_kernel, core_basis_rkhs)
             suboptimality = suboptimality_metric(product_kernel, core_basis_rkhs)
 
             current_suboptimality = suboptimality(full_sample)
-            print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}")
+            print(f"Sample size: {len(full_sample)}  |  Oversampling: {len(full_sample) / tt.parameters:.2f}  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}")
             if draw_for_stability or draw_for_stability_bound:
                 if current_suboptimality > target_suboptimality:
                     # suboptimality = sqrt(1 + mu^2 tau^2) --> mu^2 = (suboptimality^2 - 1) / tau^2 --> lambda = 1 / mu^2
@@ -379,7 +334,7 @@ if __name__ == "__main__":
                     full_sample = candidates[selected]
                     assert full_values.ndim == 1 and full_sample.shape == (len(full_values), 2)
                     current_suboptimality = suboptimality(full_sample)
-                    print(f"Sample size: {len(full_sample)}  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}")
+                    print(f"Sample size: {len(full_sample)}  |  Oversampling: {len(full_sample) / tt.parameters:.2f}  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}")
 
             K = kernel_matrix(product_kernel, full_sample)
             es = np.linalg.eigvalsh(K)
@@ -454,7 +409,8 @@ if __name__ == "__main__":
 
             if use_debiasing:
                 print("Draw debiasing sample...")
-                core_basis_l2 = CoreBasis(tt, [l2_basis]*2, core_position)
+                core_basis_l2 = CoreBasis(tt, [l2_basis]*2)
+                # TODO: The basis is wrong! We should use a transformed version of tt!
                 debiasing_sample, debiasing_weights = draw_weighted_sequence(create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size)
                 debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
                 assert debiasing_weights.shape == (len(debiasing_sample),)
@@ -470,12 +426,7 @@ if __name__ == "__main__":
                 assert np.all(np.isfinite(debiasing_core))
                 update_core += debiasing_core
 
-            assert len(tt) == 2
-            if core_position == 0:
-                update_core = update_core.reshape(dimension, rank)[None]
-            else:
-                update_core = update_core.reshape(dimension, rank).T[:, :, None]
-            tt[core_position] -= step_size * update_core
+            tt.core -= step_size * update_core.reshape(tt.core.shape)
 
             if use_debiasing:
                 full_sample = np.concatenate([full_sample, debiasing_sample], axis=0)
@@ -501,7 +452,7 @@ if __name__ == "__main__":
             color = (0, 1, 0)
         else:
             color = "k"
-        ax.plot(np.asarray(sample_sizes) / sum(cmp.size for cmp in tt), errors, ">--", color=color, fillstyle="none", linewidth=1.5, markeredgewidth=1.5, markersize=6, label=f"$r = {rank}$")
+        ax.plot(np.asarray(sample_sizes) / tt.parameters, errors, ">--", color=color, fillstyle="none", linewidth=1.5, markeredgewidth=1.5, markersize=6, label=f"$r = {rank}$")
         print()
 
     ax.set_yscale("log")
@@ -511,7 +462,7 @@ if __name__ == "__main__":
 
     plot_directory = Path(__file__).parent / "plot"
     plot_directory.mkdir(exist_ok=True)
-    plot_file = f"als_{target.__name__}"
+    plot_file = f"als_{order}_{target.__name__}"
     plot_file += "_" + "_".join(sorted(used_parameters))
     plot_file += ("_" if postfix else "") + "_".join(sorted(postfix))
     plot_path = plot_directory / f"{plot_file}.png"
