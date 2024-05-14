@@ -1,12 +1,13 @@
 from collections.abc import Callable
 import numpy as np
+from jaxtyping import Float
 from tqdm import trange
 from basis_1d import Basis
 from rkhs_1d import Kernel
 
 
-Metric = Callable[[np.ndarray], float]
-FastMetric = Callable[[np.ndarray], float]
+Metric = Callable[[Float[np.ndarray, "sample_size dimension"]], float]
+FastMetric = Callable[[Float[np.ndarray, "dimension"]], float]
 
 
 def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
@@ -27,9 +28,12 @@ def lambda_metric(kernel: Kernel, basis: Basis) -> Metric:
         bs = basis(points)
         assert bs.shape == (basis.dimension, len(points))
         # We want to compute lambda(x) = lambda_min(bs @ inv(K) @ bs.T).
-        cs = np.linalg.lstsq(K, bs.T, rcond=None)[0]
-        assert cs.shape == (len(points), basis.dimension)
-        return min(max(np.linalg.norm(bs @ cs, ord=-2), 0), 1)
+        # We first compute G = bs @ inv(K) @ bs.T.
+        G = np.linalg.lstsq(K, bs.T, rcond=None)[0]
+        assert G.shape == (len(points), basis.dimension)
+        G = bs @ G
+        assert G.shape == (basis.dimension, basis.dimension)
+        return min(max(np.linalg.norm(G, ord=-2), 0), 1)
     return lambda_
 
 
@@ -61,7 +65,7 @@ def eta_metric(kernel: Kernel, basis: Basis) -> Metric:
     return eta
 
 
-def fast_eta_metric(kernel: Kernel, basis: Basis, fixed_points: np.ndarray) -> Metric:
+def fast_eta_metric(kernel: Kernel, basis: Basis, fixed_points: np.ndarray) -> FastMetric:
     if kernel.domain != basis.domain:
         raise ValueError(f"domain mismatch: kernel domain is {kernel.domain} but basis domain is {basis.domain}")
     dimension = np.reshape(kernel.domain, (-1, 2)).shape[0]
@@ -139,7 +143,7 @@ def greedy_step(metric: Metric, full_sample: np.ndarray, selected: list[int]) ->
     return opt
 
 
-def fast_greedy_step(metric: FastMetric, sample: np.ndarray) -> int:
+def fast_greedy_step(metric: FastMetric, sample: np.ndarray, return_metric: bool = False) -> int | tuple[int, float]:
     optimal_value = -np.inf
     optimal_index = None
     for index, element in enumerate(sample):
@@ -148,6 +152,8 @@ def fast_greedy_step(metric: FastMetric, sample: np.ndarray) -> int:
             optimal_index = index
             optimal_value = value
     assert optimal_index is not None
+    if return_metric:
+        return optimal_index, optimal_value
     return optimal_index
 
 

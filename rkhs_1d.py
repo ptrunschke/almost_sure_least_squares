@@ -70,6 +70,7 @@ class H1GaussKernel(Kernel):
 
 
 def kernel_matrix(kernel: Kernel, points: np.ndarray) -> np.ndarray:
+    points = np.asarray(points)
     K = kernel(points[:, None], points[None, :])
     assert K.shape == (len(points), len(points))
     return K
