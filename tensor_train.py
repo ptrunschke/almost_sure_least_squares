@@ -288,11 +288,14 @@ class TensorTrainCoreSpace(object):
         """
         if not len(rank_one_transform) == self.tensor_train.order:
             raise ValueError("inconsistent number of univariate measurements")
-        if not all(
-            transform.ndim == 2 and transform.shape[1] == dimension
-            for transform, dimension in zip(rank_one_transform, self.tensor_train.dimensions)
-        ):
-            raise ValueError("inconsistent dimensions of univariate measurements")
+        inconsistent_factors = []
+        for position in range(self.tensor_train.order):
+            transform = rank_one_transform[position]
+            dimension = self.tensor_train.dimensions[position]
+            if transform.ndim != 2 or transform.shape[1] != dimension:
+                inconsistent_factors.append(str(position))
+        if len(inconsistent_factors) > 0:
+            raise ValueError(f"inconsistent dimensions of univariate measurement(s) {', '.join(inconsistent_factors)}")
 
         result = TensorTrain(from_tt=self.tensor_train)
         for position in range(result.order):
