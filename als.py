@@ -792,6 +792,12 @@ if __name__ == "__main__":
             errors.append(test_error)
             sample_sizes.append(len(full_sample))
 
+            svs = tt.singular_values()
+            erank_ps = lambda s: s / np.sum(s)
+            erank = lambda s: np.exp(-np.sum(erank_ps(s) * np.log(erank_ps(s))))
+            erks = "[" + ", ".join(f"{erank(svs):.2f}" for svs in svs) + "]"
+            print(f"Effective ranks: {erks}")
+
             max_derivative = np.log(np.max(errors[-50:])) - np.log(np.min(errors[-50:]))
             print(f"Max derivative: {max_derivative:.2e} > {0.05:.2e}")
             print()
