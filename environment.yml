@@ -21,3 +21,5 @@ dependencies:
   - flake8
   - flake8-pyproject
   - black
+  - pip:
+    - flake8-docstrings

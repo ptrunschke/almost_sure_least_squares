@@ -17,3 +17,4 @@ per-file-ignores = [
 ]
 max-line-length = 120
 count = true
+docstring-convention = "numpy"
