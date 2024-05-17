@@ -206,7 +206,7 @@ class TensorTrain(object):
     def transform(self, rank_one_transform: list[Float[np.ndarray, "new_dimension old_dimension"]]) -> TensorTrain:
         return TensorTrainCoreSpace(self).transform(rank_one_transform)[0].tensor_train
 
-    def evaluate(self, rank_one_measurement: list[Float[np.ndarray, "dimension sample_size"]]) -> Float[np.ndarray, "sample_size"]:
+    def evaluate(self, rank_one_measurement: list[Float[np.ndarray, "dimension sample_size"]]) -> Float[np.ndarray, " sample_size"]:
         ln, en, rn = TensorTrainCoreSpace(self).evaluate(rank_one_measurement)
         return contract("ler, ln, en, rn -> n", self.core, ln, en, rn)
 
@@ -325,15 +325,16 @@ class TensorTrainCoreSpace(object):
         result.assert_validity()
         return TensorTrainCoreSpace(result), (left_transform, rank_one_transform[core_position], right_transform)
 
-    def christoffel(self, point: FVector, bases: list[Basis]) -> float:
-        assert isinstance(point, FVector)
-        assert len(point) == len(bases) == self.tensor_train.order
+    def christoffel(self, points: Float[np.ndarray, "sample_size dimension"], bases: list[Basis]) -> Float[np.ndarray, " sample_size"]:
+        points = np.asarray(points)
+        assert points.ndim == 2 and points.shape[1] == len(bases)
+        assert len(bases) == self.tensor_train.order
         assert all(basis.dimension == dimension for basis, dimension in zip(bases, self.tensor_train.dimensions))
-        bs = [basis(point.reshape(1, -1)[:, pos]) for pos, basis in enumerate(bases)]
+        bs = [basis(points[:, pos]) for pos, basis in enumerate(bases)]
         ln, en, rn = self.evaluate(bs)
         core = self.tensor_train.core
-        assert ln.shape == (core.shape[0], 1) and en.shape == (core.shape[1], 1) and rn.shape == (core.shape[2], 1)
-        return np.sum(ln**2) * np.sum(en**2) * np.sum(rn**2) / core.size
+        assert ln.shape == (core.shape[0], points.shape[0]) and en.shape == (core.shape[1], points.shape[0]) and rn.shape == (core.shape[2], points.shape[0])
+        return np.sum(ln**2, axis=0) * np.sum(en**2, axis=0) * np.sum(rn**2, axis=0) / core.size
 
     def christoffel_sample(
         self, rng: np.random.Generator, bases: list[Basis], densities: list[Density], discretisations: list[FVector]
