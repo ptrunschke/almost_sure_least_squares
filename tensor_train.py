@@ -194,7 +194,7 @@ class TensorTrain(object):
         return self._core_position
 
     def sample_from_square(self, rng: np.random.Generator, sample_size: int = 1) -> Int[np.ndarray, " dimension"]:
-        """Sample from the square of the tensor train.
+        r"""Sample from the square of the tensor train.
 
         Notes
         -----

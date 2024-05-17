@@ -5,13 +5,16 @@ import numpy as np
 from opt_einsum import contract
 
 # from rkhs_1d import Kernel
+# from greedy_subsampling import fast_greedy_step, Metric, FastMetric
 from basis_1d import TransformedBasis, Basis
 from sampling import draw_weighted_sequence, Sampler
-from greedy_subsampling import fast_greedy_step, Metric, FastMetric
+from greedy_subsampling import FastMetric
 from tensor_train import TensorTrain, TensorTrainCoreSpace
 
 
-# def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float, repetitions: int = 10) -> np.ndarray:
+# def ensure_stability(
+#     core_basis: CoreBasis, target_metric: Metric, target: float, repetitions: int = 10
+# ) -> np.ndarray:
 #     # Draw new samples until the target is over-satisfied by a factor of 1/(1-1/e) = e / (e - 1).
 #     dimension = np.reshape(core_basis.domain, (-1, 2)).shape[0]
 #     print("Ensuring stability...")
@@ -270,7 +273,8 @@ def ensure_l2_stability(
 #         # print(f"  Projected Gramian matrix spectrum: [{np.min(es):.2e}, {np.max(es):.2e}]")
 #         # samples.append(candidates[fast_greedy_step(eta_factory(samples), candidates)])
 #         # lambda_value = lambda_(samples)
-#         # print(f"  Sample size: {len(samples)}  |  Suboptimality: {np.sqrt(1 + 1 / np.float64(lambda_value)):.2e} < {target_suboptimality:.2e}")
+#         # print(f"  Sample size: {len(samples)}"
+#         #       f"  |  Suboptimality: {np.sqrt(1 + 1 / np.float64(lambda_value)):.2e} < {target_suboptimality:.2e}")
 #         candidates_size *= 2
 #         print("-" * 80)
 #     exit()
@@ -610,7 +614,8 @@ if __name__ == "__main__":
             )
             if draw_for_stability or draw_for_stability_bound:
                 if current_suboptimality > target_suboptimality:
-                    # suboptimality = sqrt(1 + mu^2 tau^2) --> mu^2 = (suboptimality^2 - 1) / tau^2 --> lambda = 1 / mu^2
+                    # suboptimality = sqrt(1 + mu^2 tau^2)
+                    # --> mu^2 = (suboptimality^2 - 1) / tau^2 --> lambda = 1 / mu^2
                     # candidates = ensure_stability(core_basis_rkhs, lambda_, 1 / (target_suboptimality**2 - 1))
                     # candidates = np.concatenate([full_sample, candidates], axis=0)
                     # selected = np.full(len(candidates), False, dtype=bool)
@@ -620,10 +625,14 @@ if __name__ == "__main__":
                     #     selected = greedy_draw(eta_factory, selection_size, candidates, selected)
                     # else:
                     #     assert draw_for_stability_bound
-                    #     selected = greedy_bound(eta_factory, lambda_, 1 / (target_suboptimality**2 - 1), candidates, selected)
+                    #     selected = greedy_bound(
+                    #         eta_factory, lambda_, 1 / (target_suboptimality**2 - 1), candidates, selected
+                    #     )
                     # assert np.all(selected[:len(full_sample)])
                     # new_selected = selected[len(full_sample):]
-                    # full_values = np.concatenate([full_values, target(candidates[len(full_sample):][new_selected])], axis=0)
+                    # full_values = np.concatenate(
+                    #     [full_values, target(candidates[len(full_sample):][new_selected])], axis=0
+                    # )
                     # full_sample = candidates[selected]
                     assert draw_for_stability_bound
                     # core_basis_l2 = CoreBasis(tt.transform([rkhs_to_l2] * tt.order), [l2_basis]*tt.order)
@@ -721,7 +730,8 @@ if __name__ == "__main__":
 
             # ls_probability = min(target_suboptimality / l2_suboptimality(full_sample, full_weights), 1)
             # print(f"  Least squares probability: {ls_probability:.2f}")
-            # update_core = rng.binomial(1, ls_probability) * least_squares(full_sample, full_weights, full_grad, core_basis_l2)
+            # ls_scaling = rng.binomial(1, ls_probability)
+            # update_core = ls_scaling * least_squares(full_sample, full_weights, full_grad, core_basis_l2)
             # ls_scaling = min(target_suboptimality / l2_suboptimality(full_sample, full_weights), 1)
 
             # ls_scaling = 1 / np.sqrt(1 + l2_suboptimality(full_sample, full_weights))
@@ -771,7 +781,9 @@ if __name__ == "__main__":
             #     core_space_l2 = TensorTrainCoreSpace(tt)
             #     core_space_l2, (tl, te, tr) = core_space_l2.transform([rkhs_to_l2] * tt.order)
             #     core_basis_l2 = CoreBasis(core_space_l2.tensor_train, [l2_basis]*tt.order)
-            #     debiasing_sample, debiasing_weights = draw_weighted_sequence(create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size)
+            #     debiasing_sample, debiasing_weights = draw_weighted_sequence(
+            #         create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size
+            #     )
             #     debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
             #     assert debiasing_weights.shape == (len(debiasing_sample),)
             #     debiasing_values = target(debiasing_sample)
@@ -782,19 +794,24 @@ if __name__ == "__main__":
 
             #     # debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_rkhs)
 
-            #     # NOTE: Ideally, we would like to compute the quasi-projection w.r.t. the L2 basis and then perform a change of basis to the RKHS basis.
+            #     # NOTE: Ideally, we would like to compute the quasi-projection w.r.t. the L2 basis
+            #     #       and then perform a change of basis to the RKHS basis.
             #     # Consider a function v(x) = c @ b(x) where b is a V-orthonormal basis.
             #     # Moreover, suppose that B = M @ b is a change of basis to an L2-orthonormal basis.
-            #     # The quasi-projection of a function u in L2 with respect to the basis B is given by g = u(x) @ B(x).T @ B.
+            #     # The quasi-projection of a function u in L2 with respect to the basis B is given by
+            #     #     g = u(x) @ B(x).T @ B.
             #     # To add the function g to v, we have to perform a change of basis first:
             #     #     g = (u(x) @ B(x).T) @ B = (u(x) @ b(x).T) @ M.T @ M @ b.
             #     # Therefore
             #     #     f + g = c + (u(x) @ b(x).T) @ M.T @ M .
-            #     # This means that we can perform a quasi-projection w.r.t. the basis B by performing a quasi-projection w.r.t.
-            #     # the basis b and multiplying the resulting coefficients with M.T @ M.
+            #     # This means that we can perform a quasi-projection w.r.t. the basis B
+            #     # by performing a quasi-projection w.r.t. the basis b
+            #     # and multiplying the resulting coefficients with M.T @ M.
             #     # We know that the TT satisfies M.T @ M comes from the core space transform.
             #     debiasing_core = quasi_projection(debiasing_sample, residual, debiasing_weights, core_basis_l2)
-            #     debiasing_core = contract("ler, Ll, Ee, Rr -> LER", debiasing_core.reshape(tt.core.shape), tl.T @ tl, te.T @ te, tr.T @ tr).reshape(-1)
+            #     debiasing_core = contract(
+            #         "ler, Ll, Ee, Rr -> LER", debiasing_core.reshape(tt.core.shape), tl.T @ tl, te.T @ te, tr.T @ tr
+            #     ).reshape(-1)
 
             #     assert np.all(np.isfinite(debiasing_core))
             #     update_core += debiasing_core
