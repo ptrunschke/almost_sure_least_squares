@@ -457,8 +457,8 @@ class TensorTrainCoreSpace(object):
                 left_sample_sizes[rng.choice(left_rank, size=sample_size % left_rank, replace=False)] += 1
             else:
                 left_sample_sizes = np.zeros(left_rank, dtype=int)
-            for index in rng.choice(left_rank, size=sample_size):
-                left_sample_sizes[index] += 1
+                for index in rng.choice(left_rank, size=sample_size):
+                    left_sample_sizes[index] += 1
             assert np.sum(left_sample_sizes) == sample_size
             start = 0
             for index, sample_size_index in enumerate(left_sample_sizes):
@@ -480,8 +480,8 @@ class TensorTrainCoreSpace(object):
                 right_sample_sizes[rng.choice(right_rank, size=sample_size % right_rank, replace=False)] += 1
             else:
                 right_sample_sizes = np.zeros(right_rank, dtype=int)
-            for index in rng.choice(right_rank, size=sample_size):
-                right_sample_sizes[index] += 1
+                for index in rng.choice(right_rank, size=sample_size):
+                    right_sample_sizes[index] += 1
             assert np.sum(right_sample_sizes) == sample_size
             start = 0
             for index, sample_size_index in enumerate(right_sample_sizes):
