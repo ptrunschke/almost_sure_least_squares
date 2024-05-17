@@ -3,6 +3,7 @@ from typing import Optional
 from jaxtyping import Float
 import numpy as np
 from opt_einsum import contract
+
 # from rkhs_1d import Kernel
 from basis_1d import TransformedBasis, Basis
 from sampling import draw_weighted_sequence, Sampler
@@ -365,8 +366,8 @@ if __name__ == "__main__":
         FourierBasis,
         SinBasis,
     )
-    # from greedy_subsampling import fast_eta_metric, lambda_metric, suboptimality_metric
 
+    # from greedy_subsampling import fast_eta_metric, lambda_metric, suboptimality_metric
     # from least_squares import optimal_least_squares
 
     rng = np.random.default_rng(0)
@@ -626,16 +627,24 @@ if __name__ == "__main__":
                     # full_sample = candidates[selected]
                     assert draw_for_stability_bound
                     # core_basis_l2 = CoreBasis(tt.transform([rkhs_to_l2] * tt.order), [l2_basis]*tt.order)
-                    # # full_sample = ensure_greedy_stability(rng, product_kernel, core_basis_l2, discretisation, target_suboptimality, full_sample)
+                    # # full_sample = ensure_greedy_stability(rng, product_kernel, core_basis_l2, discretisation,
+                    # #                                       target_suboptimality, full_sample)
                     # full_sample = ensure_greedy_stability(rng, product_kernel, full_sample)
-                    # # full_sample = ensure_greedy_stability(rng, product_kernel, core_basis_rkhs, discretisation, target_suboptimality, full_sample)
+                    # # full_sample = ensure_greedy_stability(rng, product_kernel, core_basis_rkhs, discretisation,
+                    # #                                       target_suboptimality, full_sample)
                     # full_values = np.concatenate([full_values, target(full_sample[len(full_values):])], axis=0)
                     # current_suboptimality = suboptimality(full_sample)
-                    full_sample, full_weights = ensure_l2_stability(rng, core_basis_l2, discretisation, target_suboptimality, full_sample, full_weights)
-                    full_values = np.concatenate([full_values, target(full_sample[len(full_values):])], axis=0)
+                    full_sample, full_weights = ensure_l2_stability(
+                        rng, core_basis_l2, discretisation, target_suboptimality, full_sample, full_weights
+                    )
+                    full_values = np.concatenate([full_values, target(full_sample[len(full_values) :])], axis=0)
                     assert full_values.ndim == 1 and full_sample.shape == (len(full_values), order)
                     current_suboptimality = l2_suboptimality(full_sample, full_weights)
-                    print(f"Sample size: {len(full_sample)}  |  Oversampling: {len(full_sample) / tt.parameters:.2f}  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}")
+                    print(
+                        f"Sample size: {len(full_sample)}"
+                        f"  |  Oversampling: {len(full_sample) / tt.parameters:.2f}"
+                        f"  |  Suboptimality factor: {current_suboptimality:.1f} < {target_suboptimality:.1f}"
+                    )
 
             # K = kernel_matrix(product_kernel, full_sample)
             # es = np.linalg.eigvalsh(K)
@@ -719,10 +728,11 @@ if __name__ == "__main__":
             # print(f"  Least squares scaling: {ls_scaling:.2f}")
             # update_core = ls_scaling * least_squares(full_sample, full_weights, full_grad, core_basis_l2)
 
-
             if use_debiasing:
                 print("Perform debiasing update...")
-                debiasing_sample, debiasing_weights = draw_weighted_sequence(create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size)
+                debiasing_sample, debiasing_weights = draw_weighted_sequence(
+                    create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size
+                )
                 debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
                 assert space in ["h1", "h10"]
                 print(f"  Debiasing variance: {core_basis_l2.dimension:.2e}")
@@ -735,7 +745,9 @@ if __name__ == "__main__":
                 debiasing_grad = gradient(debiasing_sample, debiasing_values)
                 assert np.all(np.isfinite(debiasing_grad))
                 projected_debiasing_grad = update_core @ core_basis_l2(debiasing_sample)
-                debiasing_core = quasi_projection(debiasing_sample, debiasing_grad - projected_debiasing_grad, debiasing_weights, core_basis_l2)
+                debiasing_core = quasi_projection(
+                    debiasing_sample, debiasing_grad - projected_debiasing_grad, debiasing_weights, core_basis_l2
+                )
                 assert np.all(np.isfinite(debiasing_core))
                 tt.core -= step_size * update_core.reshape(tt.core.shape)
                 test_error = compute_test_error(tt)

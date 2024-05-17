@@ -43,12 +43,16 @@ class TensorTrain(object):
         assert self._components[-1].shape[-1] == 1
         assert all(cmpl.shape[2] == cmpr.shape[0] for cmpl, cmpr in zip(self._components[:-1], self._components[1:]))
         assert 0 <= self._core_position < len(self._components)
-        for m, cmp in enumerate(self._components[:self._core_position]):
+        for m, cmp in enumerate(self._components[: self._core_position]):
             cmp = cmp.reshape(-1, cmp.shape[-1])
-            assert np.linalg.norm(cmp.T @ cmp - np.eye(cmp.shape[-1])) <= 1e-12, f"component {m} (core position {self.core_position})"
-        for m, cmp in enumerate(self._components[self._core_position + 1:], start=self._core_position + 1):
+            assert (
+                np.linalg.norm(cmp.T @ cmp - np.eye(cmp.shape[-1])) <= 1e-12
+            ), f"component {m} (core position {self.core_position})"
+        for m, cmp in enumerate(self._components[self._core_position + 1 :], start=self._core_position + 1):
             cmp = cmp.reshape(cmp.shape[0], -1)
-            assert np.linalg.norm(cmp @ cmp.T - np.eye(cmp.shape[0])) <= 1e-12, f"component {m} (core position {self.core_position})"
+            assert (
+                np.linalg.norm(cmp @ cmp.T - np.eye(cmp.shape[0])) <= 1e-12
+            ), f"component {m} (core position {self.core_position})"
 
     @classmethod
     def random(cls, rng: np.random.Generator, dimensions: list[int], ranks: list[int]) -> TensorTrain:
@@ -222,7 +226,9 @@ class TensorTrain(object):
     def transform(self, rank_one_transform: list[Float[np.ndarray, "new_dimension old_dimension"]]) -> TensorTrain:
         return TensorTrainCoreSpace(self).transform(rank_one_transform)[0].tensor_train
 
-    def evaluate(self, rank_one_measurement: list[Float[np.ndarray, "dimension sample_size"]]) -> Float[np.ndarray, " sample_size"]:
+    def evaluate(
+        self, rank_one_measurement: list[Float[np.ndarray, "dimension sample_size"]]
+    ) -> Float[np.ndarray, " sample_size"]:
         ln, en, rn = TensorTrainCoreSpace(self).evaluate(rank_one_measurement)
         return contract("ler, ln, en, rn -> n", self.core, ln, en, rn)
 
@@ -231,7 +237,7 @@ class TensorTrain(object):
         right_tt = TensorTrain(from_tt=self)
         core = left_tt.core
 
-        del left_tt._components[left_tt._core_position + 1:]
+        del left_tt._components[left_tt._core_position + 1 :]
         left_tt._components[left_tt._core_position] = np.eye(left_tt.core.shape[0])[:, :, None]
         assert left_tt.order == self.core_position + 1
         assert left_tt.core_position == self.core_position
@@ -244,7 +250,10 @@ class TensorTrain(object):
         assert right_tt.order == self.order - self.core_position
         assert right_tt.core_position == 0
         assert np.all(right_tt.core == np.eye(self.core.shape[2])[None, :, :])
-        assert all(np.all(right_tt._components[pos] == self._components[self.core_position + pos]) for pos in range(1, self.order - self.core_position))
+        assert all(
+            np.all(right_tt._components[pos] == self._components[self.core_position + pos])
+            for pos in range(1, self.order - self.core_position)
+        )
 
         return left_tt, core, right_tt
 
@@ -396,7 +405,9 @@ class TensorTrainCoreSpace(object):
         result.assert_validity()
         return TensorTrainCoreSpace(result), (left_transform, rank_one_transform[core_position], right_transform)
 
-    def christoffel(self, points: Float[np.ndarray, "sample_size dimension"], bases: list[Basis]) -> Float[np.ndarray, " sample_size"]:
+    def christoffel(
+        self, points: Float[np.ndarray, "sample_size dimension"], bases: list[Basis]
+    ) -> Float[np.ndarray, " sample_size"]:
         points = np.asarray(points)
         assert points.ndim == 2 and points.shape[1] == len(bases)
         assert len(bases) == self.tensor_train.order
@@ -404,11 +415,21 @@ class TensorTrainCoreSpace(object):
         bs = [basis(points[:, pos]) for pos, basis in enumerate(bases)]
         ln, en, rn = self.evaluate(bs)
         core = self.tensor_train.core
-        assert ln.shape == (core.shape[0], points.shape[0]) and en.shape == (core.shape[1], points.shape[0]) and rn.shape == (core.shape[2], points.shape[0])
+        assert (
+            ln.shape == (core.shape[0], points.shape[0])
+            and en.shape == (core.shape[1], points.shape[0])
+            and rn.shape == (core.shape[2], points.shape[0])
+        )
         return np.sum(ln**2, axis=0) * np.sum(en**2, axis=0) * np.sum(rn**2, axis=0) / core.size
 
     def christoffel_sample(
-        self, rng: np.random.Generator, bases: list[Basis], densities: list[Density], discretisations: list[FVector], sample_size: int, stratified: bool = False
+        self,
+        rng: np.random.Generator,
+        bases: list[Basis],
+        densities: list[Density],
+        discretisations: list[FVector],
+        sample_size: int,
+        stratified: bool = False,
     ) -> Float[np.ndarray, "sample_size dimension"]:
         assert len(bases) == len(densities) == len(discretisations) == self.tensor_train.order
         assert all(basis.dimension == dimension for basis, dimension in zip(bases, self.tensor_train.dimensions))
@@ -419,9 +440,13 @@ class TensorTrainCoreSpace(object):
         transforms = lambda pos: (bases[pos](discretisations[pos]) * np.sqrt(densities[pos](discretisations[pos]))).T
         transforms = [transforms(pos) for pos in range(self.tensor_train.order)]
         left_sqrt_density, _, right_sqrt_density = self.tensor_train.split()
-        left_sqrt_density = left_sqrt_density.transform(transforms[:core_position] + [np.eye(left_sqrt_density.core.shape[1])])
+        left_sqrt_density = left_sqrt_density.transform(
+            transforms[:core_position] + [np.eye(left_sqrt_density.core.shape[1])]
+        )
         left_sqrt_density = left_sqrt_density.transpose()
-        right_sqrt_density = right_sqrt_density.transform([np.eye(right_sqrt_density.core.shape[1])] + transforms[core_position + 1:])
+        right_sqrt_density = right_sqrt_density.transform(
+            [np.eye(right_sqrt_density.core.shape[1])] + transforms[core_position + 1 :]
+        )
         assert left_sqrt_density.core_position == right_sqrt_density.core_position == 0
 
         left_sample = np.empty((sample_size, left_sqrt_density.order - 1), dtype=int)
@@ -437,9 +462,11 @@ class TensorTrainCoreSpace(object):
             assert np.sum(left_sample_sizes) == sample_size
             start = 0
             for index, sample_size_index in enumerate(left_sample_sizes):
-                left_sample_index = left_sqrt_density.fix_core(at=index).sample_from_square(rng, sample_size=sample_size_index)
+                left_sample_index = left_sqrt_density.fix_core(at=index).sample_from_square(
+                    rng, sample_size=sample_size_index
+                )
                 stop = start + sample_size_index
-                left_sample[start : stop] = left_sample_index
+                left_sample[start:stop] = left_sample_index
                 start = stop
             assert start == sample_size
             left_sample = left_sample[:, ::-1]
@@ -458,14 +485,18 @@ class TensorTrainCoreSpace(object):
             assert np.sum(right_sample_sizes) == sample_size
             start = 0
             for index, sample_size_index in enumerate(right_sample_sizes):
-                right_sample_index = right_sqrt_density.fix_core(at=index).sample_from_square(rng, sample_size=sample_size_index)
+                right_sample_index = right_sqrt_density.fix_core(at=index).sample_from_square(
+                    rng, sample_size=sample_size_index
+                )
                 stop = start + sample_size_index
-                right_sample[start : stop] = right_sample_index
+                right_sample[start:stop] = right_sample_index
                 start = stop
             assert start == sample_size
         rng.shuffle(right_sample, axis=0)
 
-        christoffel = np.sum(bases[core_position](discretisations[core_position])**2, axis=0) * densities[core_position](discretisations[core_position])
+        christoffel = np.sum(bases[core_position](discretisations[core_position]) ** 2, axis=0) * densities[
+            core_position
+        ](discretisations[core_position])
         christoffel = christoffel / np.sum(christoffel)
         middle_sample = rng.choice(len(discretisations[core_position]), size=sample_size, p=christoffel)
         assert middle_sample.shape == (sample_size,)
