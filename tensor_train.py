@@ -36,6 +36,20 @@ class TensorTrain(object):
         else:
             raise NotADirectoryError()
 
+    def assert_validity(self):
+        assert len(self._components) > 0
+        assert all(cmp.ndim == 3 for cmp in self._components)
+        assert self._components[0].shape[0] == 1
+        assert self._components[-1].shape[-1] == 1
+        assert all(cmpl.shape[2] == cmpr.shape[0] for cmpl, cmpr in zip(self._components[:-1], self._components[1:]))
+        assert 0 <= self._core_position < len(self._components)
+        for m, cmp in enumerate(self._components[:self._core_position]):
+            cmp = cmp.reshape(-1, cmp.shape[-1])
+            assert np.linalg.norm(cmp.T @ cmp - np.eye(cmp.shape[-1])) <= 1e-12, f"component {m} (core position {self.core_position})"
+        for m, cmp in enumerate(self._components[self._core_position + 1:], start=self._core_position + 1):
+            cmp = cmp.reshape(cmp.shape[0], -1)
+            assert np.linalg.norm(cmp @ cmp.T - np.eye(cmp.shape[0])) <= 1e-12, f"component {m} (core position {self.core_position})"
+
     @classmethod
     def random(cls, rng: np.random.Generator, dimensions: list[int], ranks: list[int]) -> TensorTrain:
         assert 0 < len(dimensions) == len(ranks) - 1
@@ -293,16 +307,19 @@ class TensorTrainCoreSpace(object):
         result._core_position = 0
         while result.core_position < core_position:
             result.move_core("right")
+        assert result.core_position == core_position
         left_transform = result._components[core_position][:, :, 0]
 
         result._components[core_position] = np.eye(core.shape[2])[None, :, :]
         result._core_position = result.order - 1
         while result.core_position > core_position:
             result.move_core("left")
+        assert result.core_position == core_position
         right_transform = result._components[core_position][0, :, :]
 
         core = contract("lEr, Ll, Rr -> LER", core, left_transform, right_transform)
         result._components[core_position] = core
+        result.assert_validity()
         return TensorTrainCoreSpace(result), (left_transform, rank_one_transform[core_position], right_transform)
 
     def christoffel(self, point: FVector, bases: list[Basis]) -> float:
