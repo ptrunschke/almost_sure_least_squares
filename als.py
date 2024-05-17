@@ -595,6 +595,7 @@ if __name__ == "__main__":
 
             # core_basis_l2 = CoreBasis(tt.transform([rkhs_to_l2] * tt.order), [l2_basis]*tt.order)
             core_basis_l2 = CoreBasis(tt, [l2_basis] * tt.order)
+            assert core_basis_l2.dimension == tt.core.size
 
             def l2_suboptimality(sample, weights):
                 if len(sample) < core_basis_l2.dimension:
@@ -636,11 +637,13 @@ if __name__ == "__main__":
                     # full_sample = candidates[selected]
                     assert draw_for_stability_bound
                     # core_basis_l2 = CoreBasis(tt.transform([rkhs_to_l2] * tt.order), [l2_basis]*tt.order)
-                    # # full_sample = ensure_greedy_stability(rng, product_kernel, core_basis_l2, discretisation,
-                    # #                                       target_suboptimality, full_sample)
+                    # # full_sample = ensure_greedy_stability(
+                    # #     rng, product_kernel, core_basis_l2, discretisation, target_suboptimality, full_sample
+                    # # )
                     # full_sample = ensure_greedy_stability(rng, product_kernel, full_sample)
-                    # # full_sample = ensure_greedy_stability(rng, product_kernel, core_basis_rkhs, discretisation,
-                    # #                                       target_suboptimality, full_sample)
+                    # # full_sample = ensure_greedy_stability(
+                    # #     rng, product_kernel, core_basis_rkhs, discretisation, target_suboptimality, full_sample
+                    # # )
                     # full_values = np.concatenate([full_values, target(full_sample[len(full_values):])], axis=0)
                     # current_suboptimality = suboptimality(full_sample)
                     full_sample, full_weights = ensure_l2_stability(
@@ -759,7 +762,7 @@ if __name__ == "__main__":
                     debiasing_sample, debiasing_grad - projected_debiasing_grad, debiasing_weights, core_basis_l2
                 )
                 assert np.all(np.isfinite(debiasing_core))
-                tt.core -= step_size * update_core.reshape(tt.core.shape)
+                tt.core -= step_size * debiasing_core.reshape(tt.core.shape)
                 test_error = compute_test_error(tt)
                 print(f"  Relative test set error: {test_error:.2e}")
 
