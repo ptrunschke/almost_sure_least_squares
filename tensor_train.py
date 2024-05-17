@@ -149,10 +149,11 @@ class TensorTrain(object):
         self.canonicalise("right", rounding_condition)
 
     def singular_values(self) -> list[FVector]:
-        self.canonicalise("left")
+        copy = TensorTrain(from_tt=self)
+        copy.canonicalise("left")
         singularValues = []
-        while self._core_position != self.order - 1:
-            singularValues.append(self.move_core("right")[0])
+        while copy._core_position != copy.order - 1:
+            singularValues.append(copy.move_core("right")[0])
         norm = np.array([np.linalg.norm(singularValues[0])])
         return [norm] + singularValues + [norm]
 
