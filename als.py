@@ -1,13 +1,13 @@
 from __future__ import annotations
-from typing import Optional
+# from typing import Optional
 from jaxtyping import Float
 import numpy as np
 from opt_einsum import contract
 
 # from rkhs_1d import Kernel
 # from greedy_subsampling import fast_greedy_step, Metric, FastMetric
+# from sampling import draw_weighted_sequence, Sampler
 from basis_1d import TransformedBasis, Basis
-from sampling import draw_weighted_sequence, Sampler
 from greedy_subsampling import FastMetric
 from tensor_train import TensorTrain, TensorTrainCoreSpace
 
@@ -116,7 +116,7 @@ def fast_eta_l2_metric(
 def ensure_l2_stability(
     rng: np.random.Generator,
     core_basis: CoreBasis,
-    discretisation: Float[np.ndarray, "discretisation"],
+    discretisation: Float[np.ndarray, " discretisation"],
     target_suboptimality: float,
     samples: Float[np.ndarray, "sample_size dimension"],
     weights: Float[np.ndarray, " sample_size"],
@@ -124,8 +124,7 @@ def ensure_l2_stability(
 ) -> Float[np.ndarray, "sample_size dimension"]:
     dimension = np.reshape(core_basis.domain, (-1, 2)).shape[0]
     print("Ensuring greedy stability...")
-    core_space_sampler = create_core_space_sampler(rng, core_basis, discretisation)
-    candidate_size = int(4 * core_basis.dimension * np.log(4 * core_basis.dimension))
+    candidate_size = int(repetitions * 4 * core_basis.dimension * np.log(4 * core_basis.dimension))
     # eta_l2 = fast_eta_l2_metric(core_basis, samples, weights)
     # # Note that eta_l2 = tr(G(sample + [new_point])) >= dimension * lambda_min(G(sample + [new_point])).
     # # So, we want eta_l2 to be at least dimension / target_suboptimality.
@@ -174,20 +173,24 @@ def ensure_l2_stability(
             # # NOTE: But on the other hand: Why should we?
             # The other bound is tighter and can not be made too much less submodular due to the bound weights <= 2.
 
-        candidates, candidate_weights = draw_weighted_sequence(core_space_sampler, candidate_size)
-        candidates, candidate_weights = np.asarray(candidates), np.asarray(candidate_weights)
+        christoffel_candidates = core_basis.core_space.christoffel_sample(
+            rng,
+            core_basis.bases,
+            [rho] * core_basis.core_space.tensor_train.order,
+            [discretisation] * core_basis.core_space.tensor_train.order,
+            sample_size=candidate_size,
+            stratified=True,
+        )
         assert space in ["h1", "h10"]
-        unif_candidates = rng.uniform(*l2_basis.domain, size=(candidate_size, dimension))
+        uniform_candidates = rng.uniform(*l2_basis.domain, size=(candidate_size, dimension))
+        candidates = np.concatenate([christoffel_candidates, uniform_candidates], axis=0)
         christoffel = lambda points: core_basis_l2.core_space.christoffel(points, core_basis_l2.bases)
-        unif_candidate_weights = 1 / christoffel(unif_candidates)
-        candidates = np.concatenate([candidates, unif_candidates], axis=0)
-        candidate_weights = 2 / (1 / np.concatenate([candidate_weights, unif_candidate_weights]) + 1)
-        assert np.allclose(candidate_weights, 2 / (christoffel(candidates) + 1))
+        candidate_weights = 2 / (christoffel(candidates) + 1)
         assert np.all(candidate_weights <= 2) and np.all(weights <= 2)
+        assert candidate_weights.shape == (2 * candidate_size,)
+
         etas = eta_l2(candidates, candidate_weights)
-        # etas = [eta(candidate) for candidate in candidates]
         order = np.argsort(-etas)
-        # print(etas[order])
         sample_size = np.count_nonzero(np.cumsum(etas[order]) < target_eta) + 1
         sample_size = max(sample_size, core_basis.dimension - len(samples))
         samples = np.concatenate([samples, candidates[order[:sample_size]]], axis=0)
@@ -315,23 +318,23 @@ def evaluate(
     return CoreBasis(tt, bases)(points).T @ tt.core.reshape(-1)
 
 
-def create_core_space_sampler(
-    rng: np.random.Generator, core_basis: CoreBasis, discretisation: Float[np.ndarray, "discretisation"]
-) -> Sampler:
-    core_space = core_basis.core_space
-    order = core_space.tensor_train.order
+# def create_core_space_sampler(
+#     rng: np.random.Generator, core_basis: CoreBasis, discretisation: Float[np.ndarray, "discretisation"]
+# ) -> Sampler:
+#     core_space = core_basis.core_space
+#     order = core_space.tensor_train.order
 
-    def core_space_sampler(
-        conditioned_on: Optional[tuple[list[Float[np.ndarray, "dimension"]], list[float]]] = None
-    ) -> tuple[Float[np.ndarray, "dimension"], float]:
-        sample = core_space.christoffel_sample(
-            rng, core_basis.bases, [rho] * order, [discretisation] * order, sample_size=1
-        )
-        sample = np.array(sample, dtype=float)
-        weight = 1 / core_space.christoffel(sample, core_basis.bases)
-        return sample[0], weight[0]
+#     def core_space_sampler(
+#         conditioned_on: Optional[tuple[list[Float[np.ndarray, "dimension"]], list[float]]] = None
+#     ) -> tuple[Float[np.ndarray, "dimension"], float]:
+#         sample = core_space.christoffel_sample(
+#             rng, core_basis.bases, [rho] * order, [discretisation] * order, sample_size=1
+#         )
+#         sample = np.array(sample, dtype=float)
+#         weight = 1 / core_space.christoffel(sample, core_basis.bases)
+#         return sample[0], weight[0]
 
-    return core_space_sampler
+#     return core_space_sampler
 
 
 def least_squares(points: np.ndarray, weights: np.ndarray, values: np.ndarray, basis: Basis) -> np.ndarray:
@@ -743,16 +746,21 @@ if __name__ == "__main__":
 
             if use_debiasing:
                 print("Perform debiasing update...")
-                debiasing_sample, debiasing_weights = draw_weighted_sequence(
-                    create_core_space_sampler(rng, core_basis_l2, discretisation), debiasing_sample_size
+                debiasing_sample = core_basis_l2.core_space.christoffel_sample(
+                    rng,
+                    core_basis_l2.bases,
+                    [rho] * order,
+                    [discretisation] * order,
+                    sample_size=debiasing_sample_size,
+                    stratified=True,
                 )
-                debiasing_sample, debiasing_weights = np.asarray(debiasing_sample), np.asarray(debiasing_weights)
-                assert space in ["h1", "h10"]
                 print(f"  Debiasing variance: {core_basis_l2.dimension:.2e}")
+                assert space in ["h1", "h10"]
                 mask = rng.binomial(1, 0.5, size=len(debiasing_sample)).astype(bool)
                 debiasing_sample[mask] = rng.uniform(*l2_basis.domain, size=(np.count_nonzero(mask), order))
                 christoffel = lambda points: core_basis_l2.core_space.christoffel(points, core_basis_l2.bases)
                 debiasing_weights = 2 / (christoffel(debiasing_sample) + 1)
+                assert np.all(debiasing_weights <= 2)
                 assert debiasing_weights.shape == (len(debiasing_sample),)
                 debiasing_values = target(debiasing_sample)
                 debiasing_grad = gradient(debiasing_sample, debiasing_values)
