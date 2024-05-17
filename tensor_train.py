@@ -189,18 +189,34 @@ class TensorTrain(object):
     def core_position(self) -> int:
         return self._core_position
 
-    def sample_from_square(self, rng: np.random.Generator) -> Int[np.ndarray, "dimension"]:
+    def sample_from_square(self, rng: np.random.Generator, sample_size: int = 1) -> Int[np.ndarray, " dimension"]:
+        """Sample from the square of the tensor train.
+
+        Notes
+        -----
+        Sampling from f(x, y, z)^2 given x and conditioning on z:
+          p(x, y) = \int f(x, y, z)^2 dz
+          p(y | x) = p(x, y) / p(x) ∝ \int f(x, y, z)^2 dz
+        Suppose that f(x, y, z) = C1(x) C2(y) C3(z) then
+                  p(y | x) ∝ C1(x) C2(y) (\int C3(z) C3(z).T dz) C2(y).T C1(x).T
+                           = C1(x) C2(y) C2(y).T C1(x).T .
+        """
         sqrt_density = TensorTrain(from_tt=self)
-        sqrt_density.canonicalise("left")
-        conditioning = np.ones((1,))
-        sample = np.empty(self.order, dtype=int)
+        while sqrt_density.core_position != 0:
+            sqrt_density.move_core("left")
+
+        conditioning = np.ones((sample_size, 1))
+        sample = np.empty((sample_size, self.order), dtype=int)
         for position in range(self.order):
             # Condition on the preceding variables and marginalise over the subsequent variables.
             component = sqrt_density._components[position]
-            density = contract("l, ler -> er", conditioning, component)
-            density = contract("er, er -> e", density, density)
-            sample[position] = rng.integers(0, len(density))
-            conditioning = contract("l, lr -> r", conditioning, component[:, sample[position], :])
+            pdf = contract("nl, ler -> ner", conditioning, component)
+            pdf = contract("ner, ner -> ne", pdf, pdf)
+            cdf = np.cumsum(pdf, axis=1)
+            cdf /= cdf[:, -1][:, None]
+            us = rng.random(size=(sample_size,))
+            sample[:, position] = np.count_nonzero(cdf < us[:, None], axis=1)
+            conditioning = contract("nl, lnr -> nr", conditioning, component[:, sample[:, position], :])
         return sample
 
     def transform(self, rank_one_transform: list[Float[np.ndarray, "new_dimension old_dimension"]]) -> TensorTrain:
@@ -209,6 +225,61 @@ class TensorTrain(object):
     def evaluate(self, rank_one_measurement: list[Float[np.ndarray, "dimension sample_size"]]) -> Float[np.ndarray, " sample_size"]:
         ln, en, rn = TensorTrainCoreSpace(self).evaluate(rank_one_measurement)
         return contract("ler, ln, en, rn -> n", self.core, ln, en, rn)
+
+    def split(self) -> tuple[TensorTrain, TTCore, TensorTrain]:
+        left_tt = TensorTrain(from_tt=self)
+        right_tt = TensorTrain(from_tt=self)
+        core = left_tt.core
+
+        del left_tt._components[left_tt._core_position + 1:]
+        left_tt._components[left_tt._core_position] = np.eye(left_tt.core.shape[0])[:, :, None]
+        assert left_tt.order == self.core_position + 1
+        assert left_tt.core_position == self.core_position
+        assert np.all(left_tt.core == np.eye(self.core.shape[0])[:, :, None])
+        assert all(np.all(left_tt._components[pos] == self._components[pos]) for pos in range(self.core_position))
+
+        del right_tt._components[: right_tt._core_position]
+        right_tt._core_position = 0
+        right_tt._components[right_tt._core_position] = np.eye(right_tt.core.shape[2])[None, :, :]
+        assert right_tt.order == self.order - self.core_position
+        assert right_tt.core_position == 0
+        assert np.all(right_tt.core == np.eye(self.core.shape[2])[None, :, :])
+        assert all(np.all(right_tt._components[pos] == self._components[self.core_position + pos]) for pos in range(1, self.order - self.core_position))
+
+        return left_tt, core, right_tt
+
+    def transpose(self) -> TensorTrain:
+        result = TensorTrain(from_tt=self)
+        result._components = [np.transpose(component) for component in reversed(result._components)]
+        result._core_position = result.order - result._core_position - 1
+        return result
+
+    def fix_core(self, *, at: int, direction: Optional[Literal["left"] | Literal["right"]] = None) -> TensorTrain:
+        "Contract a standard basis vector to the core of the tensor train."
+        assert self.order > 1
+        assert 0 <= at < self.core.shape[1]
+        if direction is None:
+            if self.core_position < self.order - 1:
+                direction = "right"
+            else:
+                direction = "left"
+        assert direction in ["left", "right"]
+        new_core_position = self.core_position + {"left": -1, "right": 1}[direction]
+        assert 0 <= new_core_position < self.order
+        result = TensorTrain(from_tt=self)
+        if direction == "right":
+            new_core = result._components[new_core_position]
+            new_core = contract("lL, Ler -> ler", result.core[:, at, :], new_core)
+            result._components[new_core_position] = new_core
+            del result._components[result._core_position]
+        else:
+            new_core = result._components[new_core_position]
+            new_core = contract("leR, Rr -> ler", new_core, result.core[:, at, :])
+            result._components[new_core_position] = new_core
+            del result._components[result._core_position]
+            result.core_position -= 1
+        result.assert_validity()
+        return result
 
 
 class TensorTrainCoreSpace(object):
@@ -337,24 +408,70 @@ class TensorTrainCoreSpace(object):
         return np.sum(ln**2, axis=0) * np.sum(en**2, axis=0) * np.sum(rn**2, axis=0) / core.size
 
     def christoffel_sample(
-        self, rng: np.random.Generator, bases: list[Basis], densities: list[Density], discretisations: list[FVector]
-    ) -> Float[np.ndarray, "dimension"]:
+        self, rng: np.random.Generator, bases: list[Basis], densities: list[Density], discretisations: list[FVector], sample_size: int, stratified: bool = False
+    ) -> Float[np.ndarray, "sample_size dimension"]:
         assert len(bases) == len(densities) == len(discretisations) == self.tensor_train.order
         assert all(basis.dimension == dimension for basis, dimension in zip(bases, self.tensor_train.dimensions))
+        assert sample_size > 0
+        assert all(discretisation.ndim == 1 for discretisation in discretisations)
 
-        # Draw a basis function to sample.
-        left_index = rng.integers(0, self.tensor_train.core.shape[0])
-        middle_index = rng.integers(0, self.tensor_train.core.shape[1])
-        right_index = rng.integers(0, self.tensor_train.core.shape[2])
+        core_position = self.tensor_train.core_position
+        transforms = lambda pos: (bases[pos](discretisations[pos]) * np.sqrt(densities[pos](discretisations[pos]))).T
+        transforms = [transforms(pos) for pos in range(self.tensor_train.order)]
+        left_sqrt_density, _, right_sqrt_density = self.tensor_train.split()
+        left_sqrt_density = left_sqrt_density.transform(transforms[:core_position] + [np.eye(left_sqrt_density.core.shape[1])])
+        left_sqrt_density = left_sqrt_density.transpose()
+        right_sqrt_density = right_sqrt_density.transform([np.eye(right_sqrt_density.core.shape[1])] + transforms[core_position + 1:])
+        assert left_sqrt_density.core_position == right_sqrt_density.core_position == 0
 
-        # Represent the chosen basis function as a tensor train.
-        sqrt_density = TensorTrain(from_tt=self.tensor_train)
-        core = sqrt_density.core
-        core[:] = 0
-        core[left_index, middle_index, right_index] = 1
+        left_sample = np.empty((sample_size, left_sqrt_density.order - 1), dtype=int)
+        if left_sample.size > 0:
+            left_rank = left_sqrt_density.dimensions[0]
+            if stratified:
+                left_sample_sizes = np.full(left_rank, sample_size // left_rank, dtype=int)
+                left_sample_sizes[rng.choice(left_rank, size=sample_size % left_rank, replace=False)] += 1
+            else:
+                left_sample_sizes = np.zeros(left_rank, dtype=int)
+            for index in rng.choice(left_rank, size=sample_size):
+                left_sample_sizes[index] += 1
+            assert np.sum(left_sample_sizes) == sample_size
+            start = 0
+            for index, sample_size_index in enumerate(left_sample_sizes):
+                left_sample_index = left_sqrt_density.fix_core(at=index).sample_from_square(rng, sample_size=sample_size_index)
+                stop = start + sample_size_index
+                left_sample[start : stop] = left_sample_index
+                start = stop
+            assert start == sample_size
+            left_sample = left_sample[:, ::-1]
+        rng.shuffle(left_sample, axis=0)
 
-        # Discretise sqrt_density.
-        transform = lambda pos: (bases[pos](discretisations[pos]) * np.sqrt(densities[pos](discretisations[pos]))).T
-        sqrt_density = sqrt_density.transform([transform(pos) for pos in range(self.tensor_train.order)])
-        indices = sqrt_density.sample_from_square(rng)
-        return [d[i] for d, i in zip(discretisations, indices)]
+        right_sample = np.empty((sample_size, right_sqrt_density.order - 1), dtype=int)
+        if right_sample.size > 0:
+            right_rank = right_sqrt_density.dimensions[0]
+            if stratified:
+                right_sample_sizes = np.full(right_rank, sample_size // right_rank, dtype=int)
+                right_sample_sizes[rng.choice(right_rank, size=sample_size % right_rank, replace=False)] += 1
+            else:
+                right_sample_sizes = np.zeros(right_rank, dtype=int)
+            for index in rng.choice(right_rank, size=sample_size):
+                right_sample_sizes[index] += 1
+            assert np.sum(right_sample_sizes) == sample_size
+            start = 0
+            for index, sample_size_index in enumerate(right_sample_sizes):
+                right_sample_index = right_sqrt_density.fix_core(at=index).sample_from_square(rng, sample_size=sample_size_index)
+                stop = start + sample_size_index
+                right_sample[start : stop] = right_sample_index
+                start = stop
+            assert start == sample_size
+        rng.shuffle(right_sample, axis=0)
+
+        christoffel = np.sum(bases[core_position](discretisations[core_position])**2, axis=0) * densities[core_position](discretisations[core_position])
+        christoffel = christoffel / np.sum(christoffel)
+        middle_sample = rng.choice(len(discretisations[core_position]), size=sample_size, p=christoffel)
+        assert middle_sample.shape == (sample_size,)
+
+        sample = np.concatenate([left_sample, middle_sample[:, None], right_sample], axis=1)
+        assert sample.shape == (sample_size, self.tensor_train.order)
+        sample = np.array([d[i] for d, i in zip(discretisations, sample.T)]).T
+        assert sample.shape == (sample_size, self.tensor_train.order)
+        return sample

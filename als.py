@@ -320,11 +320,11 @@ def create_core_space_sampler(
         conditioned_on: Optional[tuple[list[Float[np.ndarray, "dimension"]], list[float]]] = None
     ) -> tuple[Float[np.ndarray, "dimension"], float]:
         sample = core_space.christoffel_sample(
-            rng, core_basis.bases, [rho] * order, [discretisation] * order
+            rng, core_basis.bases, [rho] * order, [discretisation] * order, sample_size=1
         )
         sample = np.array(sample, dtype=float)
-        weight = 1 / core_space.christoffel(sample[None], core_basis.bases)[0]
-        return sample, weight
+        weight = 1 / core_space.christoffel(sample, core_basis.bases)
+        return sample[0], weight[0]
 
     return core_space_sampler
 
@@ -520,8 +520,8 @@ if __name__ == "__main__":
     product_kernel = TensorProductKernel(*(rkhs_kernel,) * order)
 
     # discretisation = np.linspace(*initial_basis.domain, 10000)
-    discretisation = np.linspace(*initial_basis.domain, 1000)
-    # discretisation = np.linspace(*initial_basis.domain, 100)
+    # discretisation = np.linspace(*initial_basis.domain, 1000)
+    discretisation = np.linspace(*initial_basis.domain, 100)
 
     discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2**13)
     rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
@@ -728,7 +728,7 @@ if __name__ == "__main__":
                 print(f"  Debiasing variance: {core_basis_l2.dimension:.2e}")
                 mask = rng.binomial(1, 0.5, size=len(debiasing_sample)).astype(bool)
                 debiasing_sample[mask] = rng.uniform(*l2_basis.domain, size=(np.count_nonzero(mask), order))
-                christoffel = lambda points: np.array([core_basis_l2.core_space.christoffel(point, core_basis_l2.bases) for point in points])
+                christoffel = lambda points: core_basis_l2.core_space.christoffel(points, core_basis_l2.bases)
                 debiasing_weights = 2 / (christoffel(debiasing_sample) + 1)
                 assert debiasing_weights.shape == (len(debiasing_sample),)
                 debiasing_values = target(debiasing_sample)
