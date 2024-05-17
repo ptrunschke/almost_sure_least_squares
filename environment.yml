@@ -18,4 +18,6 @@ dependencies:
   - jaxtyping
   - pytest
   - snakeviz
+  - flake8
+  - flake8-pyproject
   - black
