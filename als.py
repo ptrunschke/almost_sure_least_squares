@@ -3,75 +3,75 @@ from typing import Optional
 from jaxtyping import Float
 import numpy as np
 from opt_einsum import contract
-from rkhs_1d import Kernel
+# from rkhs_1d import Kernel
 from basis_1d import TransformedBasis, Basis
 from sampling import draw_weighted_sequence, Sampler
 from greedy_subsampling import fast_greedy_step, Metric, FastMetric
 from tensor_train import TensorTrain, TensorTrainCoreSpace
 
 
-def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float, repetitions: int = 10) -> np.ndarray:
-    # Draw new samples until the target is over-satisfied by a factor of 1/(1-1/e) = e / (e - 1).
-    dimension = np.reshape(core_basis.domain, (-1, 2)).shape[0]
-    print("Ensuring stability...")
-    core_space_sampler = create_core_space_sampler(rng, core_basis, discretisation)
-    candidates = []
-    target = np.e / (np.e - 1) * target
-    value = -np.inf
-    while value < target:
-        for _ in range(repetitions):
-            extension = draw_weighted_sequence(core_space_sampler, core_basis.dimension)[0]
-            extended_value = target_metric(candidates + extension)
-            if extended_value > value:
-                extended_candidates = candidates + extension
-                value = extended_value
-        candidates = extended_candidates
-        print(f"  Sample size: {len(candidates)}  |  Target metric: {value:.2e} < {target:.2e}")
-    candidates = np.asarray(candidates)
-    assert candidates.ndim == 2 and candidates.shape[1] == dimension
-    return candidates
+# def ensure_stability(core_basis: CoreBasis, target_metric: Metric, target: float, repetitions: int = 10) -> np.ndarray:
+#     # Draw new samples until the target is over-satisfied by a factor of 1/(1-1/e) = e / (e - 1).
+#     dimension = np.reshape(core_basis.domain, (-1, 2)).shape[0]
+#     print("Ensuring stability...")
+#     core_space_sampler = create_core_space_sampler(rng, core_basis, discretisation)
+#     candidates = []
+#     target = np.e / (np.e - 1) * target
+#     value = -np.inf
+#     while value < target:
+#         for _ in range(repetitions):
+#             extension = draw_weighted_sequence(core_space_sampler, core_basis.dimension)[0]
+#             extended_value = target_metric(candidates + extension)
+#             if extended_value > value:
+#                 extended_candidates = candidates + extension
+#                 value = extended_value
+#         candidates = extended_candidates
+#         print(f"  Sample size: {len(candidates)}  |  Target metric: {value:.2e} < {target:.2e}")
+#     candidates = np.asarray(candidates)
+#     assert candidates.ndim == 2 and candidates.shape[1] == dimension
+#     return candidates
 
 
-def greedy_bound(
-    selection_metric_factory: FastMetric,
-    target_metric: Metric,
-    target: float,
-    full_sample: np.ndarray,
-    selected: Optional[list[bool]] = None,
-) -> list[bool]:
-    print("Subsampling...")
-    if selected is None:
-        selected = np.full(len(full_sample), False, dtype=bool)
-    else:
-        selected = np.array(selected)
-    indices = np.arange(len(full_sample))
-    value = -np.inf
-    for selection_size in range(np.count_nonzero(selected), len(full_sample)):
-        if value >= target:
-            break
-        selection_metric = selection_metric_factory(full_sample[selected])
-        selected[indices[~selected][fast_greedy_step(selection_metric, full_sample[~selected])]] = True
-        value = target_metric(full_sample[selected])
-        print(f"  Sample size: {selection_size}  |  Target metric: {value:.2e} < {target:.2e}")
-    return selected
+# def greedy_bound(
+#     selection_metric_factory: FastMetric,
+#     target_metric: Metric,
+#     target: float,
+#     full_sample: np.ndarray,
+#     selected: Optional[list[bool]] = None,
+# ) -> list[bool]:
+#     print("Subsampling...")
+#     if selected is None:
+#         selected = np.full(len(full_sample), False, dtype=bool)
+#     else:
+#         selected = np.array(selected)
+#     indices = np.arange(len(full_sample))
+#     value = -np.inf
+#     for selection_size in range(np.count_nonzero(selected), len(full_sample)):
+#         if value >= target:
+#             break
+#         selection_metric = selection_metric_factory(full_sample[selected])
+#         selected[indices[~selected][fast_greedy_step(selection_metric, full_sample[~selected])]] = True
+#         value = target_metric(full_sample[selected])
+#         print(f"  Sample size: {selection_size}  |  Target metric: {value:.2e} < {target:.2e}")
+#     return selected
 
 
-def greedy_draw(
-    selection_metric_factory: FastMetric,
-    selection_size: int,
-    full_sample: np.ndarray,
-    selected: Optional[list[bool]] = None,
-) -> list[bool]:
-    print("Subsampling...")
-    if selected is None:
-        selected = np.full(len(full_sample), False, dtype=bool)
-    else:
-        selected = np.array(selected)
-    indices = np.arange(len(full_sample))
-    for _ in range(selection_size - np.count_nonzero(selected)):
-        selection_metric = selection_metric_factory(full_sample[selected])
-        selected[indices[~selected][fast_greedy_step(selection_metric, full_sample[~selected])]] = True
-    return selected
+# def greedy_draw(
+#     selection_metric_factory: FastMetric,
+#     selection_size: int,
+#     full_sample: np.ndarray,
+#     selected: Optional[list[bool]] = None,
+# ) -> list[bool]:
+#     print("Subsampling...")
+#     if selected is None:
+#         selected = np.full(len(full_sample), False, dtype=bool)
+#     else:
+#         selected = np.array(selected)
+#     indices = np.arange(len(full_sample))
+#     for _ in range(selection_size - np.count_nonzero(selected)):
+#         selection_metric = selection_metric_factory(full_sample[selected])
+#         selected[indices[~selected][fast_greedy_step(selection_metric, full_sample[~selected])]] = True
+#     return selected
 
 
 def fast_eta_l2_metric(
@@ -226,57 +226,58 @@ def ensure_l2_stability(
     # # we could simply multipy it with an independent Bernoulli with success probability
     # #     target_suboptimality / actual_suboptimality .
 
-def ensure_greedy_stability(
-        rng: np.random.Generator,
-        kernel: Kernel,
-        # core_basis_rkhs: CoreBasis,
-        # core_basis_l2: CoreBasis,
-        # discretisation: Float[np.ndarray, "discretisation"],
-        # target_suboptimality: float,
-        samples: Float[np.ndarray, "sample_size dimension"],
-        repetitions: int = 10,
-    ) -> Float[np.ndarray, "sample_size dimension"]:
-    raise NotImplementedError()
-    dimension = np.reshape(core_basis_rkhs.domain, (-1, 2)).shape[0]
-    print("Ensuring greedy stability...")
-    eta_factory = lambda points: fast_eta_metric(kernel, core_basis_rkhs, np.reshape(points, (-1, dimension)))
-    lambda_ = lambda_metric(kernel, core_basis_rkhs)
-    # suboptimality = sqrt(1 + mu^2 tau^2) <= sqrt(1 + 1 / lambda), since tau <= 1
-    # --> lambda = 1 / (suboptimality^2 - 1)
-    lambda_target = 1 / (target_suboptimality**2 - 1)
-    core_space_sampler = create_core_space_sampler(rng, core_basis_l2, discretisation)
-    # candidates_size = int(repetitions * 4 * core_basis_l2.dimension * np.log(4 * core_basis_l2.dimension))
-    candidates_size = 2 * core_basis_l2.dimension
-    lambda_value = -np.inf
-    samples = list(samples)
-    while lambda_value < lambda_target:
-        print(f"  Initial candidates size: {candidates_size}")
-        candidates, candidate_weights = draw_weighted_sequence(core_space_sampler, candidates_size)
-        B = core_basis_l2(candidates)
-        G = B * candidate_weights @ B.T / candidates_size
-        es = np.linalg.eigvalsh(G)
-        print(f"  L2-Gramian spectrum: [{np.min(es):.2e}, {np.max(es):.2e}]")
-        # mu_l2 = np.sum((np.sum(abs(B * candidate_weights), axis=1) / candidates_size)**2)
-        mu_l2 = np.sum(np.sum(abs(B * candidate_weights), axis=1)**2) / candidates_size**2
-        print(f"  mu_l2: {mu_l2:.2e}")
-        print(core_basis_l2.dimension, core_basis_l2.dimension**2)
-        # K = kernel_matrix(kernel, candidates)
-        # es = np.linalg.eigvalsh(K)
-        # print(f"  Kernel matrix spectrum: [{np.min(es):.2e}, {np.max(es):.2e}]")
-        # B = core_basis_rkhs(candidates)
-        # es = np.linalg.eigvalsh(B @ np.linalg.inv(K) @ B.T)
-        # print(f"  Projected Gramian matrix spectrum: [{np.min(es):.2e}, {np.max(es):.2e}]")
-        # samples.append(candidates[fast_greedy_step(eta_factory(samples), candidates)])
-        # lambda_value = lambda_(samples)
-        # print(f"  Sample size: {len(samples)}  |  Suboptimality: {np.sqrt(1 + 1 / np.float64(lambda_value)):.2e} < {target_suboptimality:.2e}")
-        candidates_size *= 2
-        print("-"*80)
-    exit()
-    samples = np.asarray(samples)
-    assert samples.ndim == 2 and samples.shape[1] == dimension
-    suboptimality = suboptimality_metric(product_kernel, core_basis_rkhs)
-    print(suboptimality(samples))
-    return samples
+
+# def ensure_greedy_stability(
+#     rng: np.random.Generator,
+#     kernel: Kernel,
+#     # core_basis_rkhs: CoreBasis,
+#     # core_basis_l2: CoreBasis,
+#     # discretisation: Float[np.ndarray, "discretisation"],
+#     # target_suboptimality: float,
+#     samples: Float[np.ndarray, "sample_size dimension"],
+#     repetitions: int = 10,
+# ) -> Float[np.ndarray, "sample_size dimension"]:
+#     raise NotImplementedError()
+#     dimension = np.reshape(core_basis_rkhs.domain, (-1, 2)).shape[0]
+#     print("Ensuring greedy stability...")
+#     eta_factory = lambda points: fast_eta_metric(kernel, core_basis_rkhs, np.reshape(points, (-1, dimension)))
+#     lambda_ = lambda_metric(kernel, core_basis_rkhs)
+#     # suboptimality = sqrt(1 + mu^2 tau^2) <= sqrt(1 + 1 / lambda), since tau <= 1
+#     # --> lambda = 1 / (suboptimality^2 - 1)
+#     lambda_target = 1 / (target_suboptimality**2 - 1)
+#     core_space_sampler = create_core_space_sampler(rng, core_basis_l2, discretisation)
+#     # candidates_size = int(repetitions * 4 * core_basis_l2.dimension * np.log(4 * core_basis_l2.dimension))
+#     candidates_size = 2 * core_basis_l2.dimension
+#     lambda_value = -np.inf
+#     samples = list(samples)
+#     while lambda_value < lambda_target:
+#         print(f"  Initial candidates size: {candidates_size}")
+#         candidates, candidate_weights = draw_weighted_sequence(core_space_sampler, candidates_size)
+#         B = core_basis_l2(candidates)
+#         G = B * candidate_weights @ B.T / candidates_size
+#         es = np.linalg.eigvalsh(G)
+#         print(f"  L2-Gramian spectrum: [{np.min(es):.2e}, {np.max(es):.2e}]")
+#         # mu_l2 = np.sum((np.sum(abs(B * candidate_weights), axis=1) / candidates_size)**2)
+#         mu_l2 = np.sum(np.sum(abs(B * candidate_weights), axis=1) ** 2) / candidates_size**2
+#         print(f"  mu_l2: {mu_l2:.2e}")
+#         print(core_basis_l2.dimension, core_basis_l2.dimension**2)
+#         # K = kernel_matrix(kernel, candidates)
+#         # es = np.linalg.eigvalsh(K)
+#         # print(f"  Kernel matrix spectrum: [{np.min(es):.2e}, {np.max(es):.2e}]")
+#         # B = core_basis_rkhs(candidates)
+#         # es = np.linalg.eigvalsh(B @ np.linalg.inv(K) @ B.T)
+#         # print(f"  Projected Gramian matrix spectrum: [{np.min(es):.2e}, {np.max(es):.2e}]")
+#         # samples.append(candidates[fast_greedy_step(eta_factory(samples), candidates)])
+#         # lambda_value = lambda_(samples)
+#         # print(f"  Sample size: {len(samples)}  |  Suboptimality: {np.sqrt(1 + 1 / np.float64(lambda_value)):.2e} < {target_suboptimality:.2e}")
+#         candidates_size *= 2
+#         print("-" * 80)
+#     exit()
+#     samples = np.asarray(samples)
+#     assert samples.ndim == 2 and samples.shape[1] == dimension
+#     suboptimality = suboptimality_metric(product_kernel, core_basis_rkhs)
+#     print(suboptimality(samples))
+#     return samples
 
 
 class CoreBasis(Basis):
