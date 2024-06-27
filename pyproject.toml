@@ -1,6 +1,22 @@
+[project]
+name = "kernel_ls"
+description = "Experiments for the paper 'Almost-sure quasi-optimal approximation in RKHS'"
+# license = {file = "LICENSE.txt"}
+# readme = "README.md"
+authors = [{name = "Philipp Trunschke"}]
+# maintainers = [{name = "Philipp Trunschke", email="philipp.trunschke@univ-nantes.fr"}]
+requires-python = ">=3.10"
+# dynamic = ["dependencies", "optional-dependencies"]
+
+# [tool.setuptools.dynamic]
+# And how about 'environment.yml'?
+# dependencies = {file = ["requirements.txt"]}
+# optional-dependencies = {dev = { file = ["requirements-dev.txt"] }}
+
 [tool.black]
 line-length = 120
 target-version = ["py310", "py311", "py312"]
+preview = true
 
 [tool.flake8]
 ignore = [
