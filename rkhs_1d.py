@@ -182,6 +182,22 @@ if __name__ == "__main__":
         k = reference_kernel(xs, xs)
         ratio = np.nan_to_num(kd / k)
 
+        # # NOTE: The Gaussian H1(rho(variance)) is not continuously embeddable into L2(rho(variance)).
+        # #       But it is embeddable into L2(rho(variance+eps)) for any eps > 0.
+        # #       The subsequent code block computes the integral of the kernel (embedding constant) numerically.
+        # if space == "h1gauss":
+        #     from scipy.special import erfc
+        #     for lim in [5, 10, 100, 1000]:
+        #         K = H1GaussKernel((-lim, lim))
+        #         # log_cK = lambda x: x**2 + np.log(1 + erf(x / np.sqrt(2))) + np.log(1 - erf(x / np.sqrt(2)))
+        #         log_cK = lambda x: x**2 + np.log(erfc(x / np.sqrt(2)))
+        #         zs = np.linspace(0, lim, 10000)
+        #         log_rho = lambda x: - x**2 / 2
+        #         m = np.exp(log_cK(zs) + log_rho(zs))
+        #         m = 2 * np.trapz(m, zs)
+        #         print(f"{m:.2e}")
+        #     exit()
+
         plt.style.use('seaborn-v0_8-deep')
         fig, ax = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
         ax.plot(xs, normalise(ratio), label=r"$\frac{k_d(x,x)}{k(x,x)}$")
