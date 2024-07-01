@@ -69,6 +69,9 @@ def __plot_step(plot_path: Path, density: Density, discretisation: np.ndarray, c
     plt.close(fig)
 
 
+integrals = None
+
+
 def draw_embedding_sample(
         rng: np.random.Generator,
         rkhs_kernel: Kernel,
@@ -84,8 +87,36 @@ def draw_embedding_sample(
     discretisation, conditioned_on = np.asarray(discretisation), np.asarray(conditioned_on)
     assert discretisation.ndim == 1 and conditioned_on.ndim == 1
 
+    global integrals
+    if integrals is None:
+        integrals = [[] for _ in range(subspace_basis.dimension)]
+
     if len(conditioned_on) < subspace_basis.dimension:
         subspace_kernel = create_subspace_kernel(subspace_basis)
+
+        # Check if the integrals of the conditional densities are independen of the sample on which is conditioned.
+        xs = np.linspace(*subspace_basis.domain, 1000)
+        reference_density = rho
+        assert subspace_basis is rkhs_basis
+        assert regularisation == 1e-8
+        # # Test 1: (sanity check) Check the marginals of volume rescaled sampling by Derezinsky.
+        # idensity = reference_density(xs)
+        # integrand = bayes_kernel_variance(create_subspace_kernel(l2_basis), xs, conditioned_on)
+        # Test 2: Check the marginals of embedding sampling.
+        idensity = create_subspace_kernel(l2_basis)(xs, xs) / subspace_kernel(xs, xs)
+        # idensity = 1 / subspace_kernel(xs, xs)
+        idensity *= rkhs_kernel(xs, xs)
+        idensity *= reference_density(xs)
+        integrand = bayes_kernel_variance(subspace_kernel, xs, conditioned_on)
+        integrand /= bayes_kernel_variance(rkhs_kernel, xs, conditioned_on) + regularisation
+        integral = np.trapz(integrand * idensity, xs)
+        integrals[len(conditioned_on)].append(integral)
+        # vrs_integral = l2_basis.dimension - len(conditioned_on)
+        # print(f"  Sample size: {len(conditioned_on)}  |  Integral: {integral:.2e}")
+        # print(f"  Sample size: {len(conditioned_on)}  |  Integral: {integrals[len(conditioned_on)][-1]:.2e}  |  VRS integral: {vrs_integral}  |  Error: {integrals[len(conditioned_on)][-1] - vrs_integral:.2e}")
+        # if len(integrals[0]) > 10:
+        #     exit()
+        # assert vrs_integral - 1 < integral <= vrs_integral + 0.5, f"Integral: {integral:.2e}  |  VRS integral: {vrs_integral}  |  Error: {integral - vrs_integral:.2e}"
 
         def density(points: np.ndarray) -> np.ndarray:
             numerator = bayes_kernel_variance(subspace_kernel, points, conditioned_on)
@@ -309,16 +340,25 @@ if __name__ == "__main__":
             weighted_density = lambda x: density(x) * rho(x)
             return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
 
+        plot_directory = Path(__file__).parent / "plot"
+        plot_directory.mkdir(exist_ok=True)
+
         # samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_embedding_sampler, marginal_subspace_volume_sampler]
         # sampler_names = ["Embedding sampler", "Volume sampler", "Subspace volume sampler", "Marginal embedding sampler", "Marginal subspace volume sampler"]
         samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_subspace_volume_sampler]
         sampler_names = ["Embedding sampling", "Volume sampling", "Subspace volume sampling", "Christoffel sampling"]
+        # samplers = [embedding_sampler]
+        # sampler_names = ["Embedding sampling"]
         constants = np.empty((len(samplers), trials, 3))
         for index in range(len(samplers)):
             print(f"Sampling scheme: {sampler_names[index]}")
             for trial in trange(trials):
                 sample = draw_sequence(samplers[index], sample_size)
                 constants[index, trial] = quasi_optimality_constants(rkhs_kernel, rkhs_basis, sample)
+
+            file_path = sampler_names[index].replace(" ", "_").lower()
+            file_path = plot_directory / f"integrals_{file_path}.npy"
+            np.save(file_path, integrals)
 
         plt.style.use('seaborn-v0_8-deep')
         fig, ax = plt.subplots(1, 3, figsize=(12, 4), dpi=300)
@@ -338,8 +378,6 @@ if __name__ == "__main__":
             ax[index].set_title(statistic)
             ax[index].legend(fontsize=8)
 
-        plot_directory = Path(__file__).parent / "plot"
-        plot_directory.mkdir(exist_ok=True)
         plot_path = plot_directory / f"sample_statistics_{space}_{basis_name}_{oversampling}x.png"
         print("Saving sample statistics plot to", plot_path)
         plt.savefig(
