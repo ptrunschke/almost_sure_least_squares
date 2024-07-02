@@ -55,6 +55,7 @@ def greedy_step(metric: Metric, full_sample: np.ndarray, selected: list[int]) ->
 
 
 if __name__ == "__main__":
+    from typing import Optional
     from pathlib import Path
     from functools import partial
 
@@ -62,6 +63,9 @@ if __name__ == "__main__":
     import matplotlib.pyplot as plt
     from matplotlib import ticker
     from tqdm import trange
+
+    from basis_1d import create_subspace_kernel
+    from sampling import draw_sample
 
     class OffsetLogLocator(ticker.LogLocator):
         def __init__(self, offset) -> None:
@@ -88,19 +92,16 @@ if __name__ == "__main__":
 
     full_sample_size = 100
     max_subsample_size = 20
-    # trials = 2
     trials = 100
 
     for space in ["h10", "h1", "h1gauss"]:
-    # for space in ["h1gauss"]:
-    # for space in ["h10"]:
         print(f"Compute subsample statistics for {space} with {basis_name} basis")
         if space == "h10":
             rkhs_kernel = H10Kernel((-1, 1))
             if basis_name == "polynomial":
-                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+                initial_basis = MonomialBasis(dimension+2, domain=(-1, 1))
             elif basis_name == "fourier":
-                initial_basis = SinBasis(dimension, domain=(-1, 1))
+                initial_basis = SinBasis(dimension+2, domain=(-1, 1))
             initial_basis = enforce_zero_trace(initial_basis)
         elif space == "h1":
             rkhs_kernel = H1Kernel((-1, 1))
@@ -125,7 +126,22 @@ if __name__ == "__main__":
         discrete_rkhs_gramian = compute_discrete_gramian(space, initial_basis.domain, 2 ** 13)
         rkhs_basis = orthonormalise(initial_basis, *discrete_rkhs_gramian)
 
-        embedding_sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=rkhs_kernel, subspace_basis=rkhs_basis, discretisation=discretisation)
+        if space == "h1gauss":
+            rho = lambda x: np.exp(-x**2 / 2) / np.sqrt(2 * np.pi)
+            discrete_l2_gramian = compute_discrete_gramian("l2gauss", initial_basis.domain, 2 ** 13)
+        else:
+            rho = lambda x: np.full(len(x), 0.5)
+            discrete_l2_gramian = compute_discrete_gramian("l2", initial_basis.domain, 2 ** 13)
+        l2_basis = orthonormalise(initial_basis, *discrete_l2_gramian)
+
+        # sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=rkhs_kernel, rkhs_basis=rkhs_basis, l2_basis=l2_basis, reference_density=rho, discretisation=discretisation)
+
+        subspace_l2_kernel = create_subspace_kernel(l2_basis)
+        def christoffel_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+            weighted_density = lambda x: subspace_l2_kernel(x, x) * rho(x)
+            return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
+
+        sampler = christoffel_sampler
 
         eta = eta_metric(rkhs_kernel, rkhs_basis)
         lambda_ = lambda_metric(rkhs_kernel, rkhs_basis)
@@ -133,18 +149,14 @@ if __name__ == "__main__":
 
         etas = np.empty((max_subsample_size, trials))
         mus = np.empty((max_subsample_size, trials))
-        for trial in trange(trials):
-            print("Draw initial sample")
-            full_sample = draw_sequence(embedding_sampler, full_sample_size, verbose=True)
+        for trial in trange(trials, position=0):
+            full_sample = draw_sequence(sampler, full_sample_size, verbose=False)
             full_sample = np.asarray(full_sample)
             assert full_sample.shape == (full_sample_size,)
             mu_value = mu(full_sample)
-            print(f"Sample size: {len(full_sample)}  |  mu: {mu_value:.2e}")
 
-            print("Start subsampling (eta)")
             selected = []
-            # for subsample_size in trange(len(full_sample)):
-            for subsample_size in trange(max_subsample_size):
+            for subsample_size in trange(max_subsample_size, position=1, leave=False):
                 selected.append(greedy_step(eta, full_sample, selected))
                 etas[subsample_size, trial] = eta(full_sample[selected])
                 mus[subsample_size, trial] = mu(full_sample[selected])
@@ -175,7 +187,7 @@ if __name__ == "__main__":
         ax_1.tick_params(axis='y', which="both", labelcolor="tab:blue")
 
         ax_2 = ax_1.twinx()
-        parts = ax_2.violinplot(mus.T, positions=positions+0.15, widths=0.35)
+        parts = ax_2.violinplot(mus[dimension-1:].T, positions=positions[dimension-1:]+0.15, widths=0.35)
         for pc in parts["bodies"]:
             # pc.set_edgecolor(tab20[6])
             pc.set_facecolor(tab20[7])
@@ -185,10 +197,15 @@ if __name__ == "__main__":
                 continue
             parts[key].set_color(tab20[6])
             pc.set_alpha(1)
-        ax_2.set_yscale("function", functions=(lambda x: np.log(x - 1), lambda x: np.exp(x) + 1))
-        formatter = ticker.FuncFormatter(lambda x, _: f"$1 + 10^{{{np.log10(x - 1):.0f}}}$")
-        ax_2.yaxis.set_major_formatter(formatter)
-        ax_2.yaxis.set_major_locator(OffsetLogLocator(1))
+        # ax_2.set_yscale("function", functions=(lambda x: np.log(x - 1), lambda x: np.exp(x) + 1))
+        # formatter = ticker.FuncFormatter(lambda x, _: f"$1 + 10^{{{np.log10(x - 1):.0f}}}$")
+        # ax_2.yaxis.set_major_formatter(formatter)
+        # ax_2.yaxis.set_major_locator(OffsetLogLocator(1))
+        ax_2.set_yscale("log")
+        ax_2.set_ylim(1, 28)
+        yticks = [1, 2, 5, 10, 25]
+        ax_2.set_yticks(yticks)
+        ax_2.set_yticklabels([str(yt) for yt in yticks])
         ax_2.set_ylabel(r"$\mu$", color="tab:red", rotation=0, labelpad=8)
         ax_2.tick_params(axis='y', labelcolor="tab:red")
 
