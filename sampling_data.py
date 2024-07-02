@@ -163,6 +163,9 @@ if __name__ == "__main__":
     # basis_name = "fourier"
 
     trials = 200
+    SHORTCUT = True
+    # NOTE: This shortcut is justified as follows. If we would reuse the old sample points in every step, and only add new ones,
+    #       the monotonicity of mu would ensure that, once mu <= 2 for n samples, mu <= 2 for n+k samples for all k >= 0.
 
     def setup(space, basis, dimension):
         if space == "h10":
@@ -206,7 +209,7 @@ if __name__ == "__main__":
         print(f"Basis: {basis_name}")
         if space in ["h10", "h1"]:
             dimensions = np.maximum(np.arange(0, 20+1, 1), 1)
-            sample_sizes = np.maximum(np.arange(0, 100+1, 10), 1)
+            sample_sizes = np.maximum(np.arange(0, 70+1, 7), 1)
             discretisation = np.linspace(-1, 1, 1000)
             rho = lambda x: np.full(len(x), 0.5)
         elif space == "h1gauss":
@@ -215,8 +218,7 @@ if __name__ == "__main__":
             discretisation = np.linspace(-16, 16, 1000)
             rho = lambda x: np.exp(-x**2 / 2) / np.sqrt(2 * np.pi)
 
-        # for sampler_name in ["Christoffel sampling", "Volume sampling", "Embedding sampling"]:
-        for sampler_name in ["Embedding sampling"]:
+        for sampler_name in ["Christoffel sampling", "Volume sampling", "Embedding sampling"]:
             print(f"Sampling scheme: {sampler_name}")
 
             constants = np.empty((len(dimensions), len(sample_sizes), trials))
@@ -244,6 +246,9 @@ if __name__ == "__main__":
                             constants[j, k, trial] = quasi_optimality_constant(rkhs_kernel, rkhs_basis, sample)
                         except np.linalg.LinAlgError:
                             constants[j, k, trial] = np.inf
+                    if np.all(constants[j, k] <= 2):
+                        constants[j, k+1:] = 0
+                        break
 
             file_path = sampler_name.replace(" ", "_").lower()
             file_path = plot_directory / f"suboptimality_constants_{space}_{file_path}.npz"
