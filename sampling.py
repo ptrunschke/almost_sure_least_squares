@@ -273,15 +273,25 @@ if __name__ == "__main__":
     # trials = 100
     trials = 1_000
 
-    for space in ["h10", "h1", "h1gauss"]:
-    # for space in ["h1gauss"]:
+    spaces = ["h10", "h1", "h1gauss"]
+
+    PAPER_Z_INTEGRAL_PLOT = True
+    if PAPER_Z_INTEGRAL_PLOT:
+        dimension = 8
+        basis_name = "polynomial"
+        oversampling = 10
+        sample_size = oversampling * dimension
+        trials = 100
+        spaces = ["h10"]
+
+    for space in spaces:
         print(f"Compute sample statistics for {space} with {basis_name} basis")
         if space == "h10":
             rkhs_kernel = H10Kernel((-1, 1))
             if basis_name == "polynomial":
-                initial_basis = MonomialBasis(dimension, domain=(-1, 1))
+                initial_basis = MonomialBasis(dimension+2, domain=(-1, 1))
             elif basis_name == "fourier":
-                initial_basis = SinBasis(dimension, domain=(-1, 1))
+                initial_basis = SinBasis(dimension+2, domain=(-1, 1))
             initial_basis = enforce_zero_trace(initial_basis)
         elif space == "h1":
             rkhs_kernel = H1Kernel((-1, 1))
@@ -347,18 +357,24 @@ if __name__ == "__main__":
         # sampler_names = ["Embedding sampler", "Volume sampler", "Subspace volume sampler", "Marginal embedding sampler", "Marginal subspace volume sampler"]
         samplers = [embedding_sampler, volume_sampler, subspace_volume_sampler, marginal_subspace_volume_sampler]
         sampler_names = ["Embedding sampling", "Volume sampling", "Subspace volume sampling", "Christoffel sampling"]
-        # samplers = [embedding_sampler]
-        # sampler_names = ["Embedding sampling"]
+        if PAPER_Z_INTEGRAL_PLOT:
+            samplers = [embedding_sampler]
+            sampler_names = ["Embedding sampling"]
         constants = np.empty((len(samplers), trials, 3))
         for index in range(len(samplers)):
             print(f"Sampling scheme: {sampler_names[index]}")
+            if sampler_names[index] == "Embedding sampling":
+                integrals = None
             for trial in trange(trials):
                 sample = draw_sequence(samplers[index], sample_size)
                 constants[index, trial] = quasi_optimality_constants(rkhs_kernel, rkhs_basis, sample)
-
-            file_path = sampler_names[index].replace(" ", "_").lower()
-            file_path = plot_directory / f"integrals_{file_path}.npy"
-            np.save(file_path, integrals)
+            if sampler_names[index] == "Embedding sampling":
+                file_path = sampler_names[index].replace(" ", "_").lower()
+                file_path = plot_directory / f"integrals_{space}_{file_path}.npy"
+                print(f"Saving integrals to '{file_path}'")
+                np.save(file_path, integrals)
+                if PAPER_Z_INTEGRAL_PLOT:
+                    exit()
 
         plt.style.use('seaborn-v0_8-deep')
         fig, ax = plt.subplots(1, 3, figsize=(12, 4), dpi=300)
