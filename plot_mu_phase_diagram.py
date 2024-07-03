@@ -1,66 +1,115 @@
 # -*- coding: utf-8 -*-
 """
 Plot the recovery phase diagram: sample size against dimension.
-The result is written to the location of the input file but with a different extension.
 """
 from pathlib import Path
-import argparse
 
 import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
+from matplotlib.lines import Line2D
 
-
-parser = argparse.ArgumentParser(description=__doc__)
-parser.add_argument(dest='DATA_PATH', type=Path, help="file containing the data")
-args = parser.parse_args()
+from plotting import plotting
 
 mpl.rc('text', usetex=True)
 mpl.rc('text.latex', preamble=r'\usepackage{amsmath,amssymb}')
 
-print(f"Loading sample statistics from '{args.DATA_PATH}'")
-z = np.load(args.DATA_PATH)
-
-ds = z["ds"]
-ss = z["ss"]
-_ds, _ss = np.meshgrid(ds, ss)
-mus = z["mus"]
-mean_mus = np.mean(mus <= 2, axis=-1)
-zero = 1e-3
-mean_mus[mean_mus == 0] = zero
+samplings = ["christoffel_sampling", "volume_sampling", "embedding_sampling"]
+sampling_names = ["Christoffel sampling", "Volume sampling", "Embedding sampling"]
+spaces = ["h10", "h1", "h1gauss"]
+ZERO = 1e-3
 
 cm = mpl.colormaps['viridis']
 cm = mpl.colors.LinearSegmentedColormap.from_list("grassland", cm(np.linspace(0, 0.85, 256)))
 
-# The grid orientation follows the MATLAB convention: an array C with shape (nrows, ncolumns) is plotted with the column
-# number as X and the row number as Y, increasing up; hence if you have: C = rand(len(x), len(y)) then you need to transpose C.
-vmin = zero
+vmin = ZERO
 vmax = 1
 nm = mpl.colors.LogNorm(vmin=vmin, vmax=vmax)
 
-# fig, ax = plt.subplots(1, 1, figsize=(3, 2), dpi=300)
-fig, ax = plt.subplots(1, 1, figsize=(6, 4), dpi=300)
-sc = ax.scatter(_ds, _ss, c=mean_mus.T, s=12, edgecolors='k', linewidths=0.5, norm=nm, cmap=cm, zorder=2)
-ylim = ax.get_ylim()
-dss = np.linspace(ds[0], ds[-1], 100)
-# p = 0.5  # Probability of success
-# nss = 2*dss*np.log(2*dss/(1-p))
-# nss = dss*np.log(dss)
-assert ds[0] == 1
-nss = dss * np.log(dss + np.e - 1) * np.log(dss[-1]) / np.log(dss[-1] + np.e - 1)
-ax.plot(dss, nss, lw=1, ls=(0, (4,2)), color='xkcd:black', zorder=1, label=r"$d\log(d)$")
-ax.plot(dss, dss, lw=1, ls=(0, (2,2)), color='xkcd:black', zorder=1, label=r"$d$")
-ax.set_ylim(*ylim)
-ax.set_xlabel(r'$d$')
-ax.set_ylabel(r'$n$', rotation=0, labelpad=10)
-ax.set_title(r"$\mathbb{P}[\mu(\boldsymbol{x}) \le 2]$")
-assert ds[-1] in [15, 20]
-ax.set_xticks(np.arange(0, ds[-1]+1, 5)[1:])
-ax.legend(loc="center left", bbox_to_anchor=(1.04, 0.5))
+geometry = {
+    "top": 1,
+    "bottom": 0,
+    "left": 0,
+    "right": 1,
+    "wspace": 0.25,  # the default as defined in rcParams
+    "hspace": 0.25,  # the default as defined in rcParams
+}
+figshape = (1, 3)
+textwidth = 6.50127  # width of the text in inches
+figwidth = textwidth  # width of the figure in inches
+# figwidth = textwidth / 2  # width of the figure in inches
+phi = (1 + np.sqrt(5)) / 2
+aspect_ratio = 0.85
+figsize = plotting.compute_figsize(geometry, figshape, aspect_ratio=aspect_ratio, figwidth=figwidth)
+figsize = (figsize[0], figsize[1] * 1.5)
 
-plot_path = args.DATA_PATH.with_suffix(".png")
-print(f"Saving sample statistics plot to '{plot_path}'")
-plt.savefig(
-    plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True
-)
-plt.close(fig)
+for space in spaces:
+    ds_end = 15 if space == "h1gauss" else 20
+    fig, ax = plt.subplots(*figshape, figsize=figsize, sharey=True, dpi=300)
+    for e, sampling in enumerate(samplings):
+        data_path = Path(f"plot/suboptimality_constants_{space}_{sampling}.npz")
+        print(f"Loading sample statistics from '{data_path}'")
+        z = np.load(data_path)
+
+        ds = z["ds"]
+        assert ds[0] == 1 and ds[-1] == ds_end
+        ns = z["ss"]
+        _ds, _ns = np.meshgrid(ds, ns)
+        # The grid orientation follows the MATLAB convention: an array C with shape (nrows, ncolumns) is plotted with the column
+        # number as X and the row number as Y, increasing up; hence if you have: C = rand(len(x), len(y)) then you need to transpose C.
+        ps = np.maximum(np.mean(z["mus"] <= 2, axis=-1), ZERO).T
+        # ps = ps > 0.5  # NOTE: uncomment to find the appropriate rates
+        lws = np.full(ps.shape, 0.4)
+        lws[ps > 0.5] = 0.8
+        ecs = np.zeros(ps.shape + (3,))
+        ecs[:] = plotting.mix("k")[:3]
+        ecs[ps > 0.5, :] = plotting.mix(cm(256), 45, "k")[:3]
+        ax[e].scatter(_ds.reshape(-1), _ns.reshape(-1), c=ps.reshape(-1), s=12, edgecolors=ecs.reshape(-1, 3), linewidths=lws.reshape(-1), norm=nm, cmap=cm, zorder=2)
+        ax[e].set_xlabel(r'$d$')
+        ax[e].set_xticks(np.arange(5, ds[-1]+1, 5))
+        ax[e].set_title(sampling_names[e])
+    ax[0].set_ylabel(r'$n$', rotation=0, labelpad=10)
+    if ds[-1] == 15:
+        ax[0].set_yticks(np.arange(10, 60, 20))
+    else:
+        ax[0].set_yticks(np.arange(10, 80, 20))
+
+    def plot_rate(axes, rate, line_style):
+        ylim = axes.get_ylim()
+        dss = np.linspace(ds[0], ds[-1], 100)
+        rss = rate(dss)
+        axes.plot(dss, rss, lw=1, ls=line_style, color="k", zorder=1, label=r"$d\log(d)$")
+        axes.set_ylim(*ylim)
+
+    if space == "h1":
+        lss = [(0, (8,2)), (0, (4,2)), (0, (2,2))]
+        plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[0])
+        plot_rate(ax[1], lambda x: x**2 / 2.5 + 0.6, lss[1])
+        plot_rate(ax[2], lambda x: 1.5 * x - 0.5, lss[2])
+        lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
+        labels = [r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d)$"]
+        fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=3)
+    elif space == "h10":
+        lss = [(0, (8,2)), (0, (4,2)), (0, (2,2))]
+        plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[0])
+        plot_rate(ax[1], lambda x: x**2 / 3.75 + (1 - 1/3.75), lss[1])
+        plot_rate(ax[2], lambda x: 1.5 * x - 0.5, lss[2])
+        lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
+        labels = [r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d)$"]
+        fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=3)
+    else:
+        assert space == "h1gauss"
+        lss = [(0, (8,2)), (0, (4,2)), (0, (2,2))]
+        plot_rate(ax[0], lambda x: x * np.log(x) / 0.95 + 1, lss[0])
+        plot_rate(ax[1], lambda x: 2.1 * x - (2.1 - 1), lss[1])
+        plot_rate(ax[2], lambda x: 1.2 * x - (1.2 - 1), lss[2])
+        lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
+        labels = [r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d)$", r"$\mathcal{O}(d)$"]
+        fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=3)
+
+    fig.tight_layout()
+
+    plot_path = Path(f"plot/suboptimality_constants_{space}.png")
+    print(f"Saving sample statistics plot to '{plot_path}'")
+    plt.savefig(plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True)
+    plt.close(fig)
