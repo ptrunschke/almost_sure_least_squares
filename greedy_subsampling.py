@@ -57,27 +57,28 @@ def greedy_step(metric: Metric, full_sample: np.ndarray, selected: list[int]) ->
 if __name__ == "__main__":
     from typing import Optional
     from pathlib import Path
-    from functools import partial
+    # from functools import partial
 
     import matplotlib as mpl
     import matplotlib.pyplot as plt
-    from matplotlib import ticker
+    # from matplotlib import ticker
     from tqdm import trange
+    from plotting import plotting
 
     from basis_1d import create_subspace_kernel
     from sampling import draw_sample
 
-    class OffsetLogLocator(ticker.LogLocator):
-        def __init__(self, offset) -> None:
-            super().__init__()
-            self.offset = offset
+    # class OffsetLogLocator(ticker.LogLocator):
+    #     def __init__(self, offset) -> None:
+    #         super().__init__()
+    #         self.offset = offset
 
-        def tick_values(self, vmin: float, vmax: float):
-            return super().tick_values(vmin - self.offset, vmax - self.offset) + self.offset
+    #     def tick_values(self, vmin: float, vmax: float):
+    #         return super().tick_values(vmin - self.offset, vmax - self.offset) + self.offset
 
-        def view_limits(self, vmin: float, vmax: float):
-            lmin, lmax = super().view_limits(vmin - self.offset, vmax - self.offset)
-            return lmin + 1, lmax + 1
+    #     def view_limits(self, vmin: float, vmax: float):
+    #         lmin, lmax = super().view_limits(vmin - self.offset, vmax - self.offset)
+    #         return lmin + 1, lmax + 1
 
     from rkhs_1d import H10Kernel, H1Kernel, H1GaussKernel
     from basis_1d import compute_discrete_gramian, enforce_zero_trace, orthonormalise, MonomialBasis, FourierBasis, SinBasis
@@ -93,6 +94,23 @@ if __name__ == "__main__":
     full_sample_size = 100
     max_subsample_size = 20
     trials = 100
+
+    tab20 = mpl.colormaps["tab20"].colors
+    geometry = {
+        "top": 1,
+        "bottom": 0,
+        "left": 0,
+        "right": 1,
+        "wspace": 0.25,  # the default as defined in rcParams
+        "hspace": 0.25,  # the default as defined in rcParams
+    }
+    figshape = (1, 1)
+    textwidth = 6.50127  # width of the text in inches
+    figwidth = textwidth  # width of the figure in inches
+    # figwidth = textwidth / 2  # width of the figure in inches
+    phi = (1 + np.sqrt(5)) / 2
+    aspect_ratio = phi
+    figsize = plotting.compute_figsize(geometry, figshape, aspect_ratio=aspect_ratio, figwidth=figwidth)
 
     for space in ["h10", "h1", "h1gauss"]:
         print(f"Compute subsample statistics for {space} with {basis_name} basis")
@@ -164,8 +182,7 @@ if __name__ == "__main__":
         assert np.all(0 < etas) and np.all(etas <= rkhs_basis.dimension)
         assert np.all(1 <= mus)
 
-        tab20 = mpl.colormaps["tab20"].colors
-        fig, ax_1 = plt.subplots(1, 1, figsize=(8, 4), dpi=300)
+        fig, ax_1 = plt.subplots(*figshape, figsize=figsize, dpi=300)
         positions = np.arange(1, max_subsample_size+1)
         parts = ax_1.violinplot(etas.T, positions=positions-0.15, widths=0.35)
         for pc in parts['bodies']:
@@ -208,6 +225,8 @@ if __name__ == "__main__":
         ax_2.set_yticklabels([str(yt) for yt in yticks])
         ax_2.set_ylabel(r"$\mu$", color="tab:red", rotation=0, labelpad=8)
         ax_2.tick_params(axis='y', labelcolor="tab:red")
+
+        fig.tight_layout()
 
         plot_directory = Path(__file__).parent / "plot"
         plot_directory.mkdir(exist_ok=True)
