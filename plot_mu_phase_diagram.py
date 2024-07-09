@@ -15,7 +15,7 @@ mpl.rc('text', usetex=True)
 mpl.rc('text.latex', preamble=r'\usepackage{amsmath,amssymb}')
 
 samplings = ["christoffel_sampling", "volume_sampling", "embedding_sampling"]
-sampling_names = ["Christoffel sampling", "Volume sampling", "Embedding sampling"]
+sampling_names = ["Christoffel sampling", "Volume sampling", "SIVS (our method)"]
 spaces = ["h10", "h1", "h1gauss"]
 ZERO = 1e-3
 
