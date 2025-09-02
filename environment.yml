@@ -2,16 +2,34 @@ name: kernel_ls
 channels:
   - conda-forge
 dependencies:
+  # == Base dependencies ==================================
   - python>=3.10
-  - fenics-dolfinx
-  - mpich
-  - pyvista
-  - numpy
-  - scipy
+  - pip>=22.1
+  - numpy>=1.22
+  - scipy>=1.8
+  - pillow
+  - jaxtyping
   - tqdm
-  - matplotlib
   - jupyter
   - ipython
+  # == Fenics =============================================
+  - fenics-dolfinx
+  - mpich
   - gmsh
   - python-gmsh
-  - pytest
+  # == Plotting ===========================================
+  - matplotlib>=3.5
+  - colorcet
+  - pyvista
+    # == Parallelisation ====================================
+  - ray-core
+    # == Linting and formatting =============================
+  - isort
+  - autopep8>=1.5
+  - black>=23.7
+  - flake8>=6.1
+  - mypy
+  - flake8-pyproject
+  - pylint>=2.14
+  # == Testing ============================================
+  - pytest>=7.4

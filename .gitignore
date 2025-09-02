@@ -6,3 +6,4 @@ __pycache__
 .micromamba
 micromamba
 .vscode
+.DS_Store

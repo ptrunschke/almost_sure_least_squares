@@ -8,6 +8,7 @@ import numpy as np
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
+import colorcet  # noqa
 
 from plotting import plotting
 
@@ -19,8 +20,9 @@ sampling_names = ["Christoffel sampling", "Volume sampling", "SIVS (our method)"
 spaces = ["h10", "h1", "h1gauss"]
 ZERO = 1e-3
 
-cm = mpl.colormaps['viridis']
-cm = mpl.colors.LinearSegmentedColormap.from_list("grassland", cm(np.linspace(0, 0.85, 256)))
+# cm = mpl.colormaps['viridis']
+# cm = mpl.colors.LinearSegmentedColormap.from_list("grassland", cm(np.linspace(0, 0.85, 256)))
+cm = plt.get_cmap("cet_gray")
 
 vmin = ZERO
 vmax = 1
@@ -63,7 +65,8 @@ for space in spaces:
         lws[ps > 0.5] = 0.8
         ecs = np.zeros(ps.shape + (3,))
         ecs[:] = plotting.mix("k")[:3]
-        ecs[ps > 0.5, :] = plotting.mix(cm(256), 45, "k")[:3]
+        # ecs[ps > 0.5, :] = plotting.mix(cm(256), 45, "k")[:3]
+        ecs[ps > 0.5, :] = plotting.mix("tab:red")[:3]
         ax[e].scatter(_ds.reshape(-1), _ns.reshape(-1), c=ps.reshape(-1), s=12, edgecolors=ecs.reshape(-1, 3), linewidths=lws.reshape(-1), norm=nm, cmap=cm, zorder=2)
         ax[e].set_xlabel(r'$d$')
         ax[e].set_xticks(np.arange(5, ds[-1]+1, 5))
@@ -109,7 +112,9 @@ for space in spaces:
 
     fig.tight_layout()
 
-    plot_path = Path(f"plot/suboptimality_constants_{space}.png")
+    # plot_path = Path(f"plot/suboptimality_constants_{space}.png")
+    plot_path = Path(f"new_plots/suboptimality_constants_{space}.png")
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
     print(f"Saving sample statistics plot to '{plot_path}'")
     plt.savefig(plot_path, dpi=300, edgecolor="none", bbox_inches="tight", transparent=True)
     plt.close(fig)
