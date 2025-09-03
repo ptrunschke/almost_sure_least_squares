@@ -162,7 +162,7 @@ if __name__ == "__main__":
     # basis_name = "fourier"
 
     trials = 200
-    SHORTCUT = True
+    SHORTCUT = False
     # NOTE: This shortcut is justified as follows. If we would reuse the old sample points in every step, and only add new ones,
     #       the monotonicity of mu would ensure that, once mu <= 2 for n samples, mu <= 2 for n+k samples for all k >= 0.
 
@@ -207,16 +207,13 @@ if __name__ == "__main__":
         print(f"Space: {space}")
         print(f"Basis: {basis_name}")
         if space in ["h10", "h1"]:
-            # dimensions = np.maximum(np.arange(0, 20+1, 1), 1)
-            dimensions = np.maximum(np.arange(0, 40+1, 1), 1)
-            # sample_sizes = np.maximum(np.arange(0, 70+1, 7), 1)
-            sample_sizes = np.maximum(np.arange(0, 140+1, 1), 1)
+            dimensions = np.arange(0, 40, 1) + 1
+            sample_sizes = np.arange(0, 140, 1) + 1
             discretisation = np.linspace(-1, 1, 1000)
             rho = lambda x: np.full(len(x), 0.5)
         elif space == "h1gauss":
-            dimensions = np.maximum(np.arange(0, 15+1, 1), 1)
-            # sample_sizes = np.maximum(np.arange(0, 50+1, 5), 1)
-            sample_sizes = np.maximum(np.arange(0, 50+1, 1), 1)
+            dimensions = np.arange(0, 15, 1) + 1
+            sample_sizes = np.arange(0, 50, 1) + 1
             discretisation = np.linspace(-16, 16, 1000)
             rho = lambda x: np.exp(-x**2 / 2) / np.sqrt(2 * np.pi)
 
@@ -243,16 +240,16 @@ if __name__ == "__main__":
                 
                 @ray.remote
                 def draw_trial(sample_size: int, trial: int) -> float:
-                    try:
-                        sample = draw_sequence(sampler, sample_size)
-                        return quasi_optimality_constant(rkhs_kernel, rkhs_basis, sample)
-                    except np.linalg.LinAlgError:
-                        return np.inf
+                    sample = draw_sequence(sampler, sample_size)
+                    return quasi_optimality_constant(rkhs_kernel, rkhs_basis, sample)
+                    # try:
+                    # except np.linalg.LinAlgError:
+                    #     return np.inf
 
                 for k, sample_size in tqdm(enumerate(sample_sizes), desc="Sample size", total=len(sample_sizes), position=1, leave=False):
                     futures = [draw_trial.remote(sample_size, trial) for trial in range(trials)]
                     constants[j, k, :] = ray.get(futures)
-                    if np.all(constants[j, k] <= 2):
+                    if SHORTCUT and np.all(constants[j, k] <= 2):
                         constants[j, k+1:] = 0
                         break
 
