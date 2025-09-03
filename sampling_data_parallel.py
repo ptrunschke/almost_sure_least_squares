@@ -13,6 +13,10 @@ Density = Callable[[np.ndarray], np.ndarray]
 Sampler = Callable[[list[float]], float]
 
 
+# REGULARISATION = 1e-8
+REGULARISATION = 1e-12
+
+
 def bayes_kernel_variance(kernel: Kernel, points: np.ndarray, conditioned_on: np.ndarray) -> np.ndarray:
     assert points.ndim == 1 and conditioned_on.ndim == 1
     kxx = kernel(points, points)
@@ -46,7 +50,7 @@ def draw_embedding_sample(
         discretisation: np.ndarray,
         *,
         conditioned_on: Optional[list[float]] = None,
-        regularisation: float = 1e-8,
+        regularisation: float = REGULARISATION,
     ) -> float:
     if conditioned_on is None:
         conditioned_on = []
@@ -125,7 +129,7 @@ def draw_sequence(sampler: Sampler, sample_size: int, *, initial_sample: Optiona
     return sample
 
 
-def kernel_gramian(kernel: Kernel, basis: Basis, points: np.ndarray, *, regularisation: float = 1e-8) -> np.ndarray:
+def kernel_gramian(kernel: Kernel, basis: Basis, points: np.ndarray, *, regularisation: float = REGULARISATION) -> np.ndarray:
     points = np.asarray(points)
     assert points.ndim == 1
     K = kernel_matrix(kernel, points)
@@ -142,9 +146,9 @@ def kernel_gramian(kernel: Kernel, basis: Basis, points: np.ndarray, *, regulari
 def quasi_optimality_constant(kernel: Kernel, basis: Basis, points: np.ndarray) -> float:
     G = kernel_gramian(kernel, basis, points)
     assert G.shape == (basis.dimension, basis.dimension)
-    mu = 1 / np.sqrt(np.linalg.norm(G, ord=-2))
-    assert np.isfinite(mu)
-    return mu
+    mu_inv = np.sqrt(np.linalg.norm(G, ord=-2))
+    assert np.isfinite(mu_inv), mu_inv
+    return 1 / mu_inv
 
 
 if __name__ == "__main__":
@@ -207,13 +211,15 @@ if __name__ == "__main__":
         print(f"Space: {space}")
         print(f"Basis: {basis_name}")
         if space in ["h10", "h1"]:
-            dimensions = np.arange(0, 40, 1) + 1
-            sample_sizes = np.arange(0, 140, 1) + 1
+            # dimensions = np.arange(0, 40, 1) + 1
+            # sample_sizes = np.arange(0, 140, 2) + 1
+            dimensions = np.arange(0, 25, 1) + 1
+            sample_sizes = np.arange(0, 80, 2) + 1
             discretisation = np.linspace(-1, 1, 1000)
             rho = lambda x: np.full(len(x), 0.5)
         elif space == "h1gauss":
             dimensions = np.arange(0, 15, 1) + 1
-            sample_sizes = np.arange(0, 50, 1) + 1
+            sample_sizes = np.arange(0, 48, 2) + 1  # len(sample_sizes of h1) / len(dimensions of h1) * len(dimensions of h1gauss) == 24 == 48 / 2
             discretisation = np.linspace(-16, 16, 1000)
             rho = lambda x: np.exp(-x**2 / 2) / np.sqrt(2 * np.pi)
 
@@ -242,9 +248,6 @@ if __name__ == "__main__":
                 def draw_trial(sample_size: int, trial: int) -> float:
                     sample = draw_sequence(sampler, sample_size)
                     return quasi_optimality_constant(rkhs_kernel, rkhs_basis, sample)
-                    # try:
-                    # except np.linalg.LinAlgError:
-                    #     return np.inf
 
                 for k, sample_size in tqdm(enumerate(sample_sizes), desc="Sample size", total=len(sample_sizes), position=1, leave=False):
                     futures = [draw_trial.remote(sample_size, trial) for trial in range(trials)]
