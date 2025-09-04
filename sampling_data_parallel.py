@@ -57,7 +57,7 @@ def draw_embedding_sample(
     discretisation, conditioned_on = np.asarray(discretisation), np.asarray(conditioned_on)
     assert discretisation.ndim == 1 and conditioned_on.ndim == 1
 
-    subspace_l2_kernel = create_subspace_kernel(l2_basis)
+    # subspace_l2_kernel = create_subspace_kernel(l2_basis)
 
     if len(conditioned_on) < rkhs_basis.dimension:
         subspace_kernel = create_subspace_kernel(rkhs_basis)
@@ -66,7 +66,7 @@ def draw_embedding_sample(
             numerator = bayes_kernel_variance(subspace_kernel, points, conditioned_on)
             denominator = bayes_kernel_variance(rkhs_kernel, points, conditioned_on) + regularisation
             density = numerator / denominator
-            density *= np.nan_to_num(subspace_l2_kernel(points, points) / subspace_kernel(points, points))
+            # density *= np.nan_to_num(subspace_l2_kernel(points, points) / subspace_kernel(points, points))
             density *= rkhs_kernel(points, points) * reference_density(points)
             return density
     else:
@@ -93,7 +93,8 @@ def draw_embedding_sample(
             numerator = np.maximum(numerator, 0)
             denominator = bayes_kernel_variance(rkhs_kernel, points, conditioned_on) + regularisation
             density = 1 + numerator / denominator
-            density *= subspace_l2_kernel(points, points) * reference_density(points)
+            # density *= subspace_l2_kernel(points, points) * reference_density(points)
+            density *= rkhs_kernel(points, points) * reference_density(points)
             return density
 
     return draw_sample(rng, density, discretisation)
@@ -230,9 +231,11 @@ if __name__ == "__main__":
             for j, dimension in tqdm(enumerate(dimensions), desc="Dimension", total=len(dimensions), position=0):
                 rkhs_kernel, l2_basis, rkhs_basis = setup(space, basis_name, dimension)
 
-                subspace_l2_kernel = create_subspace_kernel(l2_basis)
+                # subspace_l2_kernel = create_subspace_kernel(l2_basis)
+                subspace_kernel = create_subspace_kernel(rkhs_basis)
                 def christoffel_sampler(conditioned_on: Optional[list[float]] = None) -> float:
-                    weighted_density = lambda x: subspace_l2_kernel(x, x) * rho(x)
+                    # weighted_density = lambda x: subspace_l2_kernel(x, x) * rho(x)
+                    weighted_density = lambda x: subspace_kernel(x, x) * rho(x)
                     return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
 
                 if sampler_name == "Embedding sampling":
