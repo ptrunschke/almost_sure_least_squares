@@ -57,7 +57,8 @@ def draw_embedding_sample(
     discretisation, conditioned_on = np.asarray(discretisation), np.asarray(conditioned_on)
     assert discretisation.ndim == 1 and conditioned_on.ndim == 1
 
-    # subspace_l2_kernel = create_subspace_kernel(l2_basis)
+    use_l2_christoffel = True  # better results
+    subspace_l2_kernel = create_subspace_kernel(l2_basis)
 
     if len(conditioned_on) < rkhs_basis.dimension:
         subspace_kernel = create_subspace_kernel(rkhs_basis)
@@ -66,7 +67,8 @@ def draw_embedding_sample(
             numerator = bayes_kernel_variance(subspace_kernel, points, conditioned_on)
             denominator = bayes_kernel_variance(rkhs_kernel, points, conditioned_on) + regularisation
             density = numerator / denominator
-            # density *= np.nan_to_num(subspace_l2_kernel(points, points) / subspace_kernel(points, points))
+            if use_l2_christoffel:
+                density *= np.nan_to_num(subspace_l2_kernel(points, points) / subspace_kernel(points, points))
             density *= rkhs_kernel(points, points) * reference_density(points)
             return density
     else:
@@ -93,8 +95,10 @@ def draw_embedding_sample(
             numerator = np.maximum(numerator, 0)
             denominator = bayes_kernel_variance(rkhs_kernel, points, conditioned_on) + regularisation
             density = 1 + numerator / denominator
-            # density *= subspace_l2_kernel(points, points) * reference_density(points)
-            density *= rkhs_kernel(points, points) * reference_density(points)
+            if use_l2_christoffel:
+                density *= subspace_l2_kernel(points, points) * reference_density(points)
+            else:
+                density *= rkhs_kernel(points, points) * reference_density(points)
             return density
 
     return draw_sample(rng, density, discretisation)
@@ -224,17 +228,20 @@ if __name__ == "__main__":
             discretisation = np.linspace(-16, 16, 1000)
             rho = lambda x: np.exp(-x**2 / 2) / np.sqrt(2 * np.pi)
 
-        for sampler_name in ["Christoffel sampling", "Volume sampling", "Embedding sampling"]:
+        for sampler_name in ["RKHS Christoffel sampling", "L2 Christoffel sampling", "Volume sampling", "Embedding sampling"]:
             print(f"Sampling scheme: {sampler_name}")
 
             constants = np.empty((len(dimensions), len(sample_sizes), trials))
             for j, dimension in tqdm(enumerate(dimensions), desc="Dimension", total=len(dimensions), position=0):
                 rkhs_kernel, l2_basis, rkhs_basis = setup(space, basis_name, dimension)
 
-                # subspace_l2_kernel = create_subspace_kernel(l2_basis)
+                subspace_l2_kernel = create_subspace_kernel(l2_basis)
                 subspace_kernel = create_subspace_kernel(rkhs_basis)
-                def christoffel_sampler(conditioned_on: Optional[list[float]] = None) -> float:
-                    # weighted_density = lambda x: subspace_l2_kernel(x, x) * rho(x)
+                def l2_christoffel_sampler(conditioned_on: Optional[list[float]] = None) -> float:
+                    weighted_density = lambda x: subspace_l2_kernel(x, x) * rho(x)
+                    return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
+
+                def rkhs_christoffel_sampler(conditioned_on: Optional[list[float]] = None) -> float:
                     weighted_density = lambda x: subspace_kernel(x, x) * rho(x)
                     return draw_sample(rng=rng, density=weighted_density, discretisation=discretisation)
 
@@ -242,11 +249,13 @@ if __name__ == "__main__":
                     sampler = partial(draw_embedding_sample, rng=rng, rkhs_kernel=rkhs_kernel, rkhs_basis=rkhs_basis, l2_basis=l2_basis, reference_density=rho, discretisation=discretisation)
                 elif sampler_name == "Volume sampling":
                     sampler = partial(draw_volume_sample, rng=rng, rkhs_kernel=rkhs_kernel, reference_density=rho, discretisation=discretisation)
-                elif sampler_name == "Christoffel sampling":
-                    sampler = christoffel_sampler
+                elif sampler_name == "L2 Christoffel sampling":
+                    sampler = l2_christoffel_sampler
+                elif sampler_name == "RKHS Christoffel sampling":
+                    sampler = rkhs_christoffel_sampler
                 else:
                     raise NotImplementedError(f"Unknown sampling method: '{sampler_name}'")
-                
+
                 @ray.remote
                 def draw_trial(sample_size: int, trial: int) -> float:
                     sample = draw_sequence(sampler, sample_size)
