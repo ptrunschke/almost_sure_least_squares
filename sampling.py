@@ -277,7 +277,7 @@ if __name__ == "__main__":
 
     PAPER_Z_INTEGRAL_PLOT = True
     if PAPER_Z_INTEGRAL_PLOT:
-        dimension = 8
+        dimension = 10
         basis_name = "polynomial"
         oversampling = 10
         sample_size = oversampling * dimension

@@ -107,9 +107,8 @@ if __name__ == "__main__":
     figshape = (1, 1)
     textwidth = 6.50127  # width of the text in inches
     figwidth = textwidth  # width of the figure in inches
-    # figwidth = textwidth / 2  # width of the figure in inches
     phi = (1 + np.sqrt(5)) / 2
-    aspect_ratio = phi
+    aspect_ratio = 1.5 * phi
     figsize = plotting.compute_figsize(geometry, figshape, aspect_ratio=aspect_ratio, figwidth=figwidth)
 
     for space in ["h10", "h1", "h1gauss"]:
@@ -185,6 +184,9 @@ if __name__ == "__main__":
         fig, ax_1 = plt.subplots(*figshape, figsize=figsize, dpi=300)
         positions = np.arange(1, max_subsample_size+1)
         parts = ax_1.violinplot(etas.T, positions=positions-0.15, widths=0.35)
+        parts['cbars'].set_linewidth(1)
+        parts['cmins'].set_linewidth(1)
+        parts['cmaxes'].set_linewidth(1)
         for pc in parts['bodies']:
             # pc.set_edgecolor(tab20[0])
             pc.set_facecolor(tab20[1])
@@ -205,6 +207,9 @@ if __name__ == "__main__":
 
         ax_2 = ax_1.twinx()
         parts = ax_2.violinplot(mus[dimension-1:].T, positions=positions[dimension-1:]+0.15, widths=0.35)
+        parts['cbars'].set_linewidth(1)
+        parts['cmins'].set_linewidth(1)
+        parts['cmaxes'].set_linewidth(1)
         for pc in parts["bodies"]:
             # pc.set_edgecolor(tab20[6])
             pc.set_facecolor(tab20[7])

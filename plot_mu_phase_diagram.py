@@ -90,28 +90,30 @@ for space in spaces:
         axes.set_ylim(*ylim)
 
     if space == "h1":
-        lss = [(0, (2,2)), (0, (4,2)), (0, (8,2))]
+        lss = [(0, (2,2)), (0, (4,2)), (0, (8,2)), (0, (16,0))]
         plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[1])
-        plot_rate(ax[1], lambda x: x**2 / 1.9 + 0.6, lss[2])
+        # plot_rate(ax[1], lambda x: x**2 / 1.9 + 0.6, lss[2])
+        plot_rate(ax[1], lambda x: x**2 * np.log(x) / 3.9 + 0.6, lss[3])
         plot_rate(ax[2], lambda x: x**2 / 2.5 + 0.6, lss[2])
         plot_rate(ax[3], lambda x: 1.5 * x - 0.5, lss[0])
         lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
-        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$"]
-        fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=3)
+        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d^2\log(d))$"]
+        fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=4)
     elif space == "h10":
         lss = [(0, (2,2)), (0, (4,2)), (0, (8,2)), (0, (16,0))]
         plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[1])
-        plot_rate(ax[1], lambda x: x**3 / 6.75 + (1 - 1/3.75), lss[3])
+        # plot_rate(ax[1], lambda x: x**3 / 6.75 + (1 - 1/3.75), lss[3])
+        plot_rate(ax[1], lambda x: x**2 * np.log(x) / 2.0 + (1 - 1/3.75), lss[3])
         plot_rate(ax[2], lambda x: x**2 / 3.75 + (1 - 1/3.75), lss[2])
         plot_rate(ax[3], lambda x: 1.5 * x - 0.5, lss[0])
         lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
-        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d^3)$"]
+        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d^2\log(d))$"]
         fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=4)
     else:
         assert space == "h1gauss"
         lss = [(0, (2,2)), (0, (4,2)), (0, (8,2))]
-        plot_rate(ax[0], lambda x: x * np.log(x) / 0.95 + 1, lss[1])
-        plot_rate(ax[1], lambda x: x ** 2 / 2.3 + 1, lss[2])
+        plot_rate(ax[0], lambda x: x * np.log(x) / 0.98 + 1, lss[1])
+        plot_rate(ax[1], lambda x: x ** 2 / 2.4 + 1, lss[2])
         plot_rate(ax[2], lambda x: 2.3 * x - (2.1 - 1), lss[0])
         plot_rate(ax[3], lambda x: 1.1 * x - (1.2 - 1), lss[0])
         lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
