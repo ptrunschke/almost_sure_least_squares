@@ -91,25 +91,25 @@ def draw_embedding_sample(
     if integrals is None:
         integrals = [[] for _ in range(subspace_basis.dimension)]
 
+    subspace_kernel_l2 = create_subspace_kernel(l2_basis)
     if len(conditioned_on) < subspace_basis.dimension:
         subspace_kernel = create_subspace_kernel(subspace_basis)
 
         # Check if the integrals of the conditional densities are independen of the sample on which is conditioned.
         xs = np.linspace(*subspace_basis.domain, 1000)
-        reference_density = rho
         assert subspace_basis is rkhs_basis
         assert regularisation == 1e-8
-        # # Test 1: (sanity check) Check the marginals of volume rescaled sampling by Derezinsky.
-        # idensity = reference_density(xs)
-        # integrand = bayes_kernel_variance(create_subspace_kernel(l2_basis), xs, conditioned_on)
-        # Test 2: Check the marginals of embedding sampling.
-        idensity = create_subspace_kernel(l2_basis)(xs, xs) / subspace_kernel(xs, xs)
-        # idensity = 1 / subspace_kernel(xs, xs)
-        idensity *= rkhs_kernel(xs, xs)
-        idensity *= reference_density(xs)
         integrand = bayes_kernel_variance(subspace_kernel, xs, conditioned_on)
         integrand /= bayes_kernel_variance(rkhs_kernel, xs, conditioned_on) + regularisation
-        integral = np.trapz(integrand * idensity, xs)
+
+        Z1 = np.trapezoid(subspace_kernel_l2(xs, xs) * rho(xs), xs)
+        assert abs(Z1 - l2_basis.dimension) < 1e-3
+        Z2 = np.trapezoid(rkhs_kernel(xs, xs) * rho(xs), xs)
+
+        reference_density = rkhs_kernel(xs, xs) / subspace_kernel(xs, xs) * rho(xs)
+        reference_density *= 0.5 * (subspace_kernel_l2(xs, xs) / Z1 + subspace_kernel(xs, xs) / Z2)
+
+        integral = np.trapezoid(integrand * reference_density, xs)
         integrals[len(conditioned_on)].append(integral)
         # vrs_integral = l2_basis.dimension - len(conditioned_on)
         # print(f"  Sample size: {len(conditioned_on)}  |  Integral: {integral:.2e}")
@@ -121,7 +121,11 @@ def draw_embedding_sample(
         def density(points: np.ndarray) -> np.ndarray:
             numerator = bayes_kernel_variance(subspace_kernel, points, conditioned_on)
             denominator = bayes_kernel_variance(rkhs_kernel, points, conditioned_on) + regularisation
-            return numerator / denominator
+
+            reference_density = rkhs_kernel(points, points) / subspace_kernel(points, points) * rho(points)
+            reference_density *= 0.5 * (subspace_kernel_l2(points, points) / Z1 + subspace_kernel(points, points) / Z2)
+
+            return numerator / denominator * reference_density
     else:
         def density(points: np.ndarray) -> np.ndarray:
             bc = subspace_basis(conditioned_on)
@@ -145,7 +149,10 @@ def draw_embedding_sample(
             assert numerator.shape == points.shape
             numerator = np.maximum(numerator, 0)
             denominator = bayes_kernel_variance(rkhs_kernel, points, conditioned_on) + regularisation
-            return 1 + numerator / denominator
+
+            reference_density = subspace_kernel_l2(points, points) / l2_basis.dimension * rho(points)
+
+            return (1 + numerator / denominator) * reference_density
 
     if plot:
         plot_path = plot_directory / f"embedding_density_step-{len(conditioned_on)+1}.png"

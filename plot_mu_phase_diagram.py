@@ -15,11 +15,15 @@ from plotting import plotting
 mpl.rc('text', usetex=True)
 mpl.rc('text.latex', preamble=r'\usepackage{amsmath,amssymb}')
 
-samplings = ["l2_christoffel_sampling", "rkhs_christoffel_sampling", "volume_sampling", "embedding_sampling"]
-sampling_names = ["$L^2$-Christoffel sampling", r"$\mathcal{V}$-Christoffel sampling", "Volume sampling", "SIVS (our method)"]
+# samplings = ["l2_christoffel_sampling", "rkhs_christoffel_sampling", "volume_sampling", "embedding_sampling"]
+# sampling_names = ["$L^2$-Christoffel sampling", r"$\mathcal{V}$-Christoffel sampling", "Volume sampling", "SIVS (our method)"]
+samplings = ["l2_christoffel_sampling", "volume_sampling", "embedding_sampling"]
+sampling_names = ["Christoffel sampling", "Volume sampling", "SIVS (our method)"]
 spaces = ["h10", "h1", "h1gauss"]
 ZERO = 1e-3
 
+
+assert len(samplings) == len(sampling_names)
 cm = plt.get_cmap("cet_gray")
 
 vmin = ZERO
@@ -35,7 +39,7 @@ geometry = {
     "hspace": 0.25,  # the default as defined in rcParams
 }
 # figshape = (2, 2)
-figshape = (1, 4)
+figshape = (1, len(samplings))
 textwidth = 6.50127  # width of the text in inches
 figwidth = textwidth  # width of the figure in inches
 aspect_ratio = 0.85
@@ -90,34 +94,47 @@ for space in spaces:
         axes.set_ylim(*ylim)
 
     if space == "h1":
-        lss = [(0, (2,2)), (0, (4,2)), (0, (8,2)), (0, (16,0))]
+        # lss = [(0, (2,2)), (0, (4,2)), (0, (8,2)), (0, (16,0))]
+        # labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d^2\log(d))$"]
+        # plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[1])
+        # plot_rate(ax[1], lambda x: x**2 * np.log(x) / 3.9 + 0.6, lss[3])
+        # plot_rate(ax[2], lambda x: x**2 / 2.5 + 0.6, lss[2])
+        # plot_rate(ax[3], lambda x: 1.5 * x - 0.5, lss[0])
+        lss = [(0, (2,2)), (0, (4,2)), (0, (8,2))]
+        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$"]
         plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[1])
-        # plot_rate(ax[1], lambda x: x**2 / 1.9 + 0.6, lss[2])
-        plot_rate(ax[1], lambda x: x**2 * np.log(x) / 3.9 + 0.6, lss[3])
-        plot_rate(ax[2], lambda x: x**2 / 2.5 + 0.6, lss[2])
-        plot_rate(ax[3], lambda x: 1.5 * x - 0.5, lss[0])
+        plot_rate(ax[1], lambda x: x**2 / 2.5 + 0.6, lss[2])
+        plot_rate(ax[2], lambda x: 1.5 * x - 0.5, lss[0])
         lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
-        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d^2\log(d))$"]
         fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=4)
     elif space == "h10":
-        lss = [(0, (2,2)), (0, (4,2)), (0, (8,2)), (0, (16,0))]
+        # lss = [(0, (2,2)), (0, (4,2)), (0, (8,2)), (0, (16,0))]
+        # labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d^2\log(d))$"]
+        # plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[1])
+        # plot_rate(ax[1], lambda x: x**2 * np.log(x) / 2.0 + (1 - 1/3.75), lss[3])
+        # plot_rate(ax[2], lambda x: x**2 / 3.75 + (1 - 1/3.75), lss[2])
+        # plot_rate(ax[3], lambda x: 1.5 * x - 0.5, lss[0])
+        lss = [(0, (2,2)), (0, (4,2)), (0, (8,2))]
+        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$"]
         plot_rate(ax[0], lambda x: x * np.log(x) / 1.1 + 1, lss[1])
-        # plot_rate(ax[1], lambda x: x**3 / 6.75 + (1 - 1/3.75), lss[3])
-        plot_rate(ax[1], lambda x: x**2 * np.log(x) / 2.0 + (1 - 1/3.75), lss[3])
-        plot_rate(ax[2], lambda x: x**2 / 3.75 + (1 - 1/3.75), lss[2])
-        plot_rate(ax[3], lambda x: 1.5 * x - 0.5, lss[0])
+        plot_rate(ax[1], lambda x: x**2 / 3.75 + (1 - 1/3.75), lss[2])
+        plot_rate(ax[2], lambda x: 1.5 * x - 0.5, lss[0])
         lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
-        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$", r"$\mathcal{O}(d^2\log(d))$"]
         fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=4)
     else:
         assert space == "h1gauss"
-        lss = [(0, (2,2)), (0, (4,2)), (0, (8,2))]
+        # lss = [(0, (2,2)), (0, (4,2)), (0, (8,2))]
+        # labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$"]
+        # plot_rate(ax[0], lambda x: x * np.log(x) / 0.98 + 1, lss[1])
+        # plot_rate(ax[1], lambda x: x ** 2 / 2.4 + 1, lss[2])
+        # plot_rate(ax[2], lambda x: 2.3 * x - (2.1 - 1), lss[0])
+        # plot_rate(ax[3], lambda x: 1.1 * x - (1.2 - 1), lss[0])
+        lss = [(0, (2,2)), (0, (4,2))]
+        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$"]
         plot_rate(ax[0], lambda x: x * np.log(x) / 0.98 + 1, lss[1])
-        plot_rate(ax[1], lambda x: x ** 2 / 2.4 + 1, lss[2])
-        plot_rate(ax[2], lambda x: 2.3 * x - (2.1 - 1), lss[0])
-        plot_rate(ax[3], lambda x: 1.1 * x - (1.2 - 1), lss[0])
+        plot_rate(ax[1], lambda x: 2.3 * x - (2.1 - 1), lss[0])
+        plot_rate(ax[2], lambda x: 1.1 * x - (1.2 - 1), lss[0])
         lines = [Line2D([], [], lw=1, ls=ls, color="k") for ls in lss]
-        labels = [r"$\mathcal{O}(d)$", r"$\mathcal{O}(d\log(d))$", r"$\mathcal{O}(d^2)$"]
         fig.legend(lines, labels, loc='outside upper center', bbox_to_anchor=(0.5, 1.1), ncol=3)
 
     fig.tight_layout()
